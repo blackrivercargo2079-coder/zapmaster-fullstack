@@ -324,51 +324,68 @@ const Campaigns: React.FC = () => {
       const contact = targetContacts[i];
       setCurrentContactName(contact.name);
 
-      let mainMessage = message;
+      // 📝 Montar mensagem completa
+      let fullMessage = message;
+      
+      // Adicionar CTA se houver
       if (ctaText && ctaLink) {
-        mainMessage += `\n\n${ctaText}: ${ctaLink}`;
+        fullMessage += `\n\n${ctaText}: ${ctaLink}`;
+      }
+      
+      // Adicionar opção de descadastro se habilitado
+      if (unsubscribe) {
+        fullMessage += `\n\nCaso não queira receber mais mensagens, responda Sair.`;
       }
 
-      const footerMessage = `Caso não queira receber mais mensagens, responda Sair.`;
+      console.log(`--- Iniciando Disparo: Texto -> Imagens -> Descadastre ---`);
       console.log(`Enviando ${i + 1}/${targetContacts.length} para ${contact.phone}...`);
+      console.log(`Conta usada: ${connectedAccount.name}`);
 
       let contactSuccess = true;
       let contactError: string | null = null;
 
       try {
-        // ETAPA 1: Texto
-        if (mainMessage.trim()) {
-          const textResult = await apiService.sendMessage(connectedAccount, contact.phone, mainMessage);
-          if (!textResult.success) {
-            contactSuccess = false;
-            contactError = textResult.error || 'Erro desconhecido';
-          }
-          if (contactSuccess && banners.length > 0 && mainMessage.trim()) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-          }
-        }
-
-        // ETAPA 2: Imagens
-        if (contactSuccess && banners.length > 0) {
+        // 🔥 CORREÇÃO: Enviar TUDO DE UMA VEZ
+        // Se tem imagem, envia imagem com caption (texto)
+        if (banners.length > 0) {
           for (const banner of banners) {
-            const imgResult = await apiService.sendMessage(connectedAccount, contact.phone, '', banner);
-            if (!imgResult.success) {
+            const result = await apiService.sendMessage(
+              connectedAccount, 
+              contact.phone, 
+              fullMessage, // Texto completo (mensagem + CTA + descadastro)
+              banner       // Imagem
+            );
+            
+            if (!result.success) {
               contactSuccess = false;
-              contactError = imgResult.error || 'Erro ao enviar imagem';
+              contactError = result.error || 'Erro ao enviar';
               break;
             }
+            
+            console.log('✅ Mensagem enviada:', result.messageId);
+            
+            // Se tem múltiplas imagens, aguarda entre elas
             if (banners.length > 1) {
-              await new Promise(resolve => setTimeout(resolve, 1000));
+              await new Promise(resolve => setTimeout(resolve, 1500));
             }
+            
+            // ⚠️ IMPORTANTE: Só envia o texto uma vez (na primeira imagem)
+            // Nas próximas imagens, não repete o texto
+            fullMessage = '';
           }
-        }
-
-        // ETAPA 3: Descadastre
-        if (contactSuccess && unsubscribe) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const footerResult = await apiService.sendMessage(connectedAccount, contact.phone, footerMessage);
-          if (!footerResult.success) {
-            console.warn('Falha ao enviar footer de descadastre:', footerResult.error);
+        } else {
+          // Se NÃO tem imagem, envia só o texto
+          const result = await apiService.sendMessage(
+            connectedAccount, 
+            contact.phone, 
+            fullMessage
+          );
+          
+          if (!result.success) {
+            contactSuccess = false;
+            contactError = result.error || 'Erro ao enviar';
+          } else {
+            console.log('✅ Mensagem enviada:', result.messageId);
           }
         }
       } catch (err: any) {
