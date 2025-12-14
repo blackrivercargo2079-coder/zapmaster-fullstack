@@ -169,7 +169,7 @@ const Campaigns: React.FC = () => {
     fetchSegmentCounts();
   }, [selectedSegment]);
 
-  // ✅ Função OTIMIZADA para comprimir imagem MUITO MAIS
+  // ✅ Função para comprimir imagem (mantém prefixo para preview)
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -180,7 +180,6 @@ const Campaigns: React.FC = () => {
         img.onload = () => {
           const canvas = document.createElement('canvas');
           
-          // ✅ REDUZIR MAIS: 800x800 ao invés de 1024x1024
           const MAX_WIDTH = 800;
           const MAX_HEIGHT = 800;
           let width = img.width;
@@ -203,13 +202,8 @@ const Campaigns: React.FC = () => {
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
           
-          // ✅ COMPRIMIR MAIS: qualidade 0.5 ao invés de 0.7
+          // ✅ MANTÉM o prefixo para funcionar no preview
           let base64 = canvas.toDataURL('image/jpeg', 0.5);
-          
-          // ✅ REMOVER PREFIXO: Envia só o base64 puro
-          if (base64.includes('base64,')) {
-            base64 = base64.split('base64,')[1];
-          }
           
           console.log('📷 Imagem comprimida:', {
             originalSize: file.size,
@@ -217,6 +211,7 @@ const Campaigns: React.FC = () => {
             reduction: Math.round((1 - base64.length / file.size) * 100) + '%'
           });
           
+          // ✅ Retorna COM prefixo (para preview funcionar)
           resolve(base64);
         };
         img.onerror = (error) => reject(error);
