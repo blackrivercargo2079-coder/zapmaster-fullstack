@@ -344,29 +344,26 @@ app.get('/api/messages/:phone', async (req, res) => {
 app.delete('/api/messages/:phone', async (req, res) => {
   try {
     await connectDB();
-    await Message.deleteMany({ phone: req.params.phone });
-    res.json({ message: 'Mensagens excluídas' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============================================
-// DELETE MENSAGEM POR ID (NOVA ROTA)
-// ============================================
-app.delete('/api/messages/:id', async (req, res) => {
-  try {
-    await connectDB();
-    const message = await Message.findByIdAndDelete(req.params.id);
     
-    if (!message) {
-      return res.status(404).json({ error: 'Mensagem não encontrada' });
+    // Verifica se é um ObjectId (mensagem individual) ou telefone (todas as mensagens)
+    if (mongoose.Types.ObjectId.isValid(req.params.phone)) {
+      // É um ID de mensagem - deletar uma mensagem
+      const message = await Message.findByIdAndDelete(req.params.phone);
+      
+      if (!message) {
+        return res.status(404).json({ error: 'Mensagem não encontrada' });
+      }
+      
+      console.log('✅ Mensagem excluída:', req.params.phone);
+      res.json({ message: 'Mensagem excluída com sucesso', deletedId: req.params.phone });
+    } else {
+      // É um telefone - deletar todas as mensagens
+      await Message.deleteMany({ phone: req.params.phone });
+      console.log('✅ Mensagens excluídas para:', req.params.phone);
+      res.json({ message: 'Mensagens excluídas' });
     }
-    
-    console.log('✅ Mensagem excluída:', req.params.id);
-    res.json({ message: 'Mensagem excluída com sucesso', deletedId: req.params.id });
   } catch (error) {
-    console.error('❌ Erro ao excluir mensagem:', error);
+    console.error('❌ Erro ao excluir mensagem(ns):', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -382,6 +379,28 @@ app.get('/api/chats', async (req, res) => {
       .limit(50);
     res.json(chats);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE CHAT (CONVERSA INTEIRA)
+app.delete('/api/chats/:phone', async (req, res) => {
+  try {
+    await connectDB();
+    
+    const phone = req.params.phone.replace(/\D/g, '');
+    
+    // Deletar chat
+    const chat = await Chat.findOneAndDelete({ phone });
+    
+    if (!chat) {
+      return res.status(404).json({ error: 'Chat não encontrado' });
+    }
+    
+    console.log('✅ Chat excluído:', phone);
+    res.json({ message: 'Chat excluído com sucesso', phone });
+  } catch (error) {
+    console.error('❌ Erro ao excluir chat:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -800,6 +819,7 @@ app.get('/', (req, res) => {
       accounts: '/api/accounts',
       contacts: '/api/contacts',
       chats: '/api/chats',
+      deleteChat: '/api/chats/:phone',
       messages: '/api/messages/:phone',
       deleteMessage: '/api/messages/:id',
       sendMessage: '/api/send-message',

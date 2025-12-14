@@ -132,6 +132,9 @@ export default function ChatPage() {
     }
   };
 
+  // ============================================
+  // FUNÇÃO: EXCLUIR MENSAGEM
+  // ============================================
   const handleDeleteMessage = async (messageId: string) => {
     if (!confirm('Deseja realmente excluir esta mensagem?')) return;
 
@@ -150,6 +153,9 @@ export default function ChatPage() {
     }
   };
 
+  // ============================================
+  // FUNÇÃO: ABRIR MODAL DE ENCAMINHAR
+  // ============================================
   const handleOpenForwardModal = (message: Message) => {
     setMessageToForward(message);
     setShowForwardModal(true);
@@ -157,6 +163,9 @@ export default function ChatPage() {
     setForwardSearchTerm('');
   };
 
+  // ============================================
+  // FUNÇÃO: SELECIONAR/DESSELECIONAR CONTATO
+  // ============================================
   const toggleSelectContact = (phone: string) => {
     setSelectedForwardContacts(prev =>
       prev.includes(phone)
@@ -165,6 +174,9 @@ export default function ChatPage() {
     );
   };
 
+  // ============================================
+  // FUNÇÃO: ENCAMINHAR MENSAGEM
+  // ============================================
   const handleForwardMessage = async () => {
     if (selectedForwardContacts.length === 0 || !messageToForward) {
       alert('Selecione pelo menos um contato');
@@ -194,6 +206,49 @@ export default function ChatPage() {
     } catch (error) {
       console.error('❌ Erro ao encaminhar:', error);
       alert('Erro ao encaminhar mensagem');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============================================
+  // FUNÇÃO: EXCLUIR CONVERSA INTEIRA
+  // ============================================
+  const handleDeleteChat = async () => {
+    if (!activePhone) return;
+    
+    if (!confirm(`Deseja realmente excluir toda a conversa com ${activePhone}?\n\nIsso irá apagar todas as mensagens.`)) {
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // Deletar todas as mensagens
+      const response = await fetch(`${API_URL}/messages/${activePhone}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Deletar o chat
+        await fetch(`${API_URL}/chats/${activePhone}`, {
+          method: 'DELETE',
+        });
+
+        // Limpar mensagens da tela
+        setMessages([]);
+        
+        // Atualizar lista de chats
+        await loadChats();
+        
+        // Desselecionar conversa
+        setActivePhone(null);
+
+        alert('✅ Conversa excluída com sucesso!');
+      }
+    } catch (error) {
+      console.error('❌ Erro ao excluir conversa:', error);
+      alert('Erro ao excluir conversa');
     } finally {
       setLoading(false);
     }
@@ -250,10 +305,25 @@ export default function ChatPage() {
       <div className="flex-1 flex flex-col">
         {activePhone ? (
           <>
-            <div className="bg-white border-b p-4">
-              <h3 className="font-semibold text-gray-800">{activePhone}</h3>
+            {/* Header com Botão de Excluir Conversa */}
+            <div className="bg-white border-b p-4 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-800">{activePhone}</h3>
+              </div>
+              
+              {/* Botão Excluir Conversa */}
+              <button
+                onClick={handleDeleteChat}
+                disabled={loading}
+                className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+                title="Excluir conversa"
+              >
+                <Trash2 size={18} />
+                <span className="text-sm font-medium">Excluir conversa</span>
+              </button>
             </div>
 
+            {/* Mensagens */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
               {messages.map((msg) => (
                 <div
@@ -261,6 +331,7 @@ export default function ChatPage() {
                   className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}
                 >
                   <div className="flex items-end gap-2">
+                    {/* Botões de ação (aparecem no hover) */}
                     {msg.fromMe && (
                       <div className="opacity-0 group-hover:opacity-100 transition flex gap-1 mb-1">
                         <button
@@ -305,6 +376,7 @@ export default function ChatPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* Input de Mensagem */}
             <form onSubmit={handleSendMessage} className="bg-white border-t p-4">
               <div className="flex gap-2">
                 <input
@@ -334,7 +406,9 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* MODAL DE ENCAMINHAR */}
+      {/* ============================================ */}
+      {/* MODAL DE ENCAMINHAR MENSAGEM */}
+      {/* ============================================ */}
       {showForwardModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[80vh] flex flex-col">
@@ -408,7 +482,6 @@ export default function ChatPage() {
                 className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
                 {loading ? 'Enviando...' : `Encaminhar (${selectedForwardContacts.length})`}
-              >
               </button>
             </div>
           </div>
