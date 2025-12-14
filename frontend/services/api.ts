@@ -4,8 +4,6 @@ const STORAGE_KEY = 'zapmaster_settings';
 const STORAGE_KEY_ACCOUNTS = 'zapmaster_accounts';
 const STORAGE_KEY_CONTACTS = 'zapmaster_contacts';
 
-// --- HELPERS ---
-
 export const getSettings = (): SystemSettings => {
   const saved = localStorage.getItem(STORAGE_KEY);
   try {
@@ -22,24 +20,19 @@ export const saveSettings = (settings: SystemSettings) => {
 const cleanZApiUrl = (url: string): string => {
   if (!url) return '';
   let clean = url.trim();
-  clean = clean.replace(/\/(send-text|send-image|send-document|send-audio|send-messages|send-sticker|status|qrcode|restart|disconnect|phone-exists|chats|messages)(\/?)($/i, '');
+  clean = clean.replace(/\/(send-text|send-image|send-document|send-audio|send-messages|send-sticker|status|qrcode|restart|disconnect|phone-exists|chats|messages)(\/?)$/i, '');
   if (clean.endsWith('/')) clean = clean.slice(0, -1);
   return clean;
 };
 
-// --- PARSER ESPECÍFICO Z-API (BAILEYS) ---
-
 const extractTextFromZApi = (msg: any): string => {
   if (!msg) return '';
-
-  // 1. Tenta campos diretos (API simplificada)
   if (typeof msg.text === 'string' && msg.text) return msg.text;
   if (typeof msg.body === 'string' && msg.body) return msg.body;
   if (typeof msg.message === 'string' && msg.message) return msg.message;
   if (typeof msg.content === 'string' && msg.content) return msg.content;
   if (typeof msg.caption === 'string' && msg.caption) return msg.caption;
 
-  // 2. Tenta estrutura Baileys (Objeto 'message')
   const m = msg.message || msg.content || msg;
   if (m.conversation) return m.conversation;
   if (m.extendedTextMessage?.text) return m.extendedTextMessage.text;
@@ -50,7 +43,6 @@ const extractTextFromZApi = (msg: any): string => {
   if (m.listResponseMessage?.title) return m.listResponseMessage.title;
   if (m.templateButtonReplyMessage?.selectedId) return m.templateButtonReplyMessage.selectedId;
 
-  // Tenta deep search se nada foi achado
   try {
     const jsonStr = JSON.stringify(m);
     if (jsonStr.includes('"text":"')) {
@@ -82,8 +74,6 @@ const isProduction = () => {
   return !!apiUrl && apiUrl.trim().length > 0;
 };
 
-// --- WEBHOOK MODE (PRODUCTION SERVER) ---
-
 const WEBHOOK_SERVER = import.meta.env.VITE_API_URL || 'http://localhost:3002';
 
 export const apiServiceWebhook = {
@@ -92,24 +82,24 @@ export const apiServiceWebhook = {
       const response = await fetch(`${WEBHOOK_SERVER}/api/chats`);
       if (response.ok) {
         const chats = await response.json();
-        console.log('✅ Chats carregados do webhook:', chats.length);
+        console.log('Chats carregados do webhook:', chats.length);
         return chats;
       }
     } catch (e) {
-      console.log('⚠️ Servidor webhook offline, usando modo normal');
+      console.log('Servidor webhook offline');
     }
     return [];
   },
 
   async getMessagesFromWebhook(phone: string): Promise<ChatMessage[]> {
     if (!phone || typeof phone !== 'string') {
-      console.warn('⚠️ Phone inválido fornecido ao webhook:', phone);
+      console.warn('Phone inválido:', phone);
       return [];
     }
 
     const cleanPhone = phone.replace(/\D/g, '');
     if (!cleanPhone) {
-      console.warn('⚠️ Phone vazio após limpeza');
+      console.warn('Phone vazio após limpeza');
       return [];
     }
 
@@ -117,18 +107,16 @@ export const apiServiceWebhook = {
       const response = await fetch(`${WEBHOOK_SERVER}/api/messages/${cleanPhone}`);
       if (response.ok) {
         const messages = await response.json();
-        console.log('✅ Mensagens carregadas do webhook:', messages.length);
+        console.log('Mensagens carregadas:', messages.length);
         return messages;
       }
     } catch (e) {
-      console.log('⚠️ Servidor webhook offline');
+      console.log('Servidor webhook offline');
     }
 
     return [];
   }
 };
-
-// --- CORE API ---
 
 export const apiService = {
   async testConnection(): Promise<{ success: boolean; message: string }> {
@@ -145,7 +133,7 @@ export const apiService = {
       if (response.status === 401) return { success: false, message: "Erro 401: Chave API inválida." };
       return { success: false, message: `Erro ${response.status}` };
     } catch (error: any) {
-      return { success: false, message: "Erro de Rede/CORS. Verifique HTTPS." };
+      return { success: false, message: "Erro de Rede/CORS." };
     }
   },
 
@@ -211,10 +199,10 @@ export const apiService = {
       }
 
       if (cleanUrl.includes('/instances/') && cleanUrl.includes('/token/')) {
-        return { success: false, error: 'URL deve apontar para /status (não para /token). Ex: https://api.z-api.io/instances/SEU_ID', cleanedUrl: cleanUrl };
+        return { success: false, error: 'URL deve apontar para /status', cleanedUrl: cleanUrl };
       }
 
-      return { success: false, error: `Erro ${response.status}. Verifique a URL e o Token.`, cleanedUrl: cleanUrl };
+      return { success: false, error: `Erro ${response.status}`, cleanedUrl: cleanUrl };
     } catch (e: any) {
       return { success: false, error: e.message, cleanedUrl: cleanUrl };
     }
@@ -222,7 +210,6 @@ export const apiService = {
 
   async sendMessage(account: Account, phone: string, message?: string, imageBase64?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
     if (!phone) {
-      console.warn('⚠️ Telefone não fornecido');
       return { success: false, error: 'Telefone não fornecido' };
     }
 
@@ -258,18 +245,15 @@ export const apiService = {
 
   async getChatMessages(account: Account, chatId: string): Promise<ChatMessage[]> {
     if (!chatId || typeof chatId !== 'string') {
-      console.error('❌ chatId inválido:', chatId);
       return [];
     }
 
     const webhookMessages = await apiServiceWebhook.getMessagesFromWebhook(chatId);
     if (webhookMessages.length > 0) {
-      console.log('✅ Mensagens carregadas do webhook:', webhookMessages.length);
       return webhookMessages;
     }
 
     if (!account || !account.zApiUrl) {
-      console.warn('⚠️ Conta não configurada ou sem Z-API URL');
       return [];
     }
 
@@ -300,7 +284,7 @@ export const apiService = {
         }).reverse();
       }
     } catch (e) {
-      console.error('❌ Erro ao buscar mensagens:', e);
+      console.error('Erro ao buscar mensagens:', e);
     }
 
     return [];
@@ -309,12 +293,10 @@ export const apiService = {
   async getChats(account: Account): Promise<ChatSession[]> {
     const webhookChats = await apiServiceWebhook.getChatsFromWebhook();
     if (webhookChats.length > 0) {
-      console.log('✅ Chats carregados do webhook:', webhookChats.length);
       return webhookChats;
     }
 
     if (!account || !account.zApiUrl) {
-      console.warn('⚠️ Conta não configurada ou sem Z-API URL');
       return [];
     }
 
@@ -339,7 +321,7 @@ export const apiService = {
         }));
       }
     } catch (e) {
-      console.error('❌ Erro ao buscar chats:', e);
+      console.error('Erro ao buscar chats:', e);
     }
 
     return [];
@@ -368,7 +350,6 @@ export const apiService = {
         await new Promise(r => setTimeout(r, 100));
 
         if (!chat.id || typeof chat.id !== 'string') {
-          console.warn('⚠️ Chat ID ausente ou inválido.');
           continue;
         }
 
@@ -392,7 +373,7 @@ export const apiService = {
         }
       }
     } catch (e) {
-      console.error('❌ Erro ao verificar blacklist:', e);
+      console.error('Erro ao verificar blacklist:', e);
     }
 
     if (hasUpdates) {
