@@ -1,216 +1,244 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Search, User, Loader2, RefreshCw } from 'lucide-react';
+import { Send, Trash2, Forward, X, Check, Search } from 'lucide-react';
 
-interface ChatItem {
+interface Message {
+  _id: string;
+  text: string;
+  sender: 'user' | 'agent';
+  timestamp: Date;
+  fromMe: boolean;
+}
+
+interface Chat {
   phone: string;
-  contactName: string;
+  contactName?: string;
   lastMessage: string;
   unreadCount: number;
   lastMessageAt: Date;
 }
 
-interface Message {
+interface Contact {
   _id: string;
+  name: string;
   phone: string;
-  text: string;
-  sender: 'user' | 'agent' | 'system';
-  fromMe: boolean;
-  timestamp: Date;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://zapmaster-backend.vercel.app';
-
-const Chat: React.FC = () => {
-  const [chats, setChats] = useState<ChatItem[]>([]);
+export default function ChatPage() {
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [allContacts, setAllContacts] = useState<Contact[]>([]);
   const [activePhone, setActivePhone] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState('');
-  const [isLoadingChats, setIsLoadingChats] = useState(false);
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [messageInput, setMessageInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  
+  // Estados do modal de encaminhar
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [messageToForward, setMessageToForward] = useState<Message | null>(null);
+  const [forwardSearchTerm, setForwardSearchTerm] = useState('');
+  const [selectedForwardContacts, setSelectedForwardContacts] = useState<string[]>([]);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Carrega chats do backend
-  const loadChats = async (silent = false) => {
-    try {
-      if (!silent) setIsLoadingChats(true);
-      const response = await fetch(`${API_URL}/api/chats`);
-      const data = await response.json();
-      console.log('📋 Chats carregados do webhook:', data.length);
-      setChats(data);
-      if (!silent) setIsLoadingChats(false);
-    } catch (error) {
-      console.error('❌ Erro ao carregar chats:', error);
-      if (!silent) setIsLoadingChats(false);
-    }
-  };
+  const API_URL = 'https://zapmaster-backend.vercel.app/api';
 
-  // Carrega mensagens de um chat específico
-  const loadMessages = async (phone: string, silent = false) => {
-    try {
-      if (!silent) setIsLoadingMessages(true);
-      const response = await fetch(`${API_URL}/api/messages/${phone}`);
-      const data = await response.json();
-      console.log('💬 Mensagens carregadas:', data.length);
-      setMessages(data.reverse()); // Inverte para ordem cronológica
-      if (!silent) setIsLoadingMessages(false);
-    } catch (error) {
-      console.error('❌ Erro ao carregar mensagens:', error);
-      if (!silent) setIsLoadingMessages(false);
-    }
-  };
-
-  // Carrega chats inicial
   useEffect(() => {
     loadChats();
+    loadAllContacts();
+    const interval = setInterval(loadChats, 5000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Polling - atualiza chats e mensagens automaticamente
   useEffect(() => {
-    const interval = setInterval(() => {
-      loadChats(true); // Atualiza lista silenciosamente
-      if (activePhone) {
-        loadMessages(activePhone, true); // Atualiza mensagens silenciosamente
-      }
-    }, 3000); // A cada 3 segundos
-
-    return () => clearInterval(interval);
+    if (activePhone) {
+      loadMessages(activePhone);
+      const interval = setInterval(() => loadMessages(activePhone), 3000);
+      return () => clearInterval(interval);
+    }
   }, [activePhone]);
 
-  // Scroll automático para última mensagem
   useEffect(() => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+    scrollToBottom();
   }, [messages]);
 
-  // Seleciona um chat
-  const handleChatSelect = (phone: string) => {
-    setActivePhone(phone);
-    setMessages([]);
-    loadMessages(phone);
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Envia mensagem
-  const handleSend = async () => {
-    if (!inputValue.trim() || !activePhone) return;
+  const loadChats = async () => {
+    try {
+      const response = await fetch(`${API_URL}/chats`);
+      const data = await response.json();
+      setChats(data);
+    } catch (error) {
+      console.error('Erro ao carregar chats:', error);
+    }
+  };
 
-    const messageText = inputValue;
-    setInputValue(''); // Limpa input imediatamente
+  const loadAllContacts = async () => {
+    try {
+      const response = await fetch(`${API_URL}/contacts`);
+      const data = await response.json();
+      setAllContacts(data);
+    } catch (error) {
+      console.error('Erro ao carregar contatos:', error);
+    }
+  };
 
-    // Adiciona mensagem otimista (aparece instantaneamente)
+  const loadMessages = async (phone: string) => {
+    try {
+      const response = await fetch(`${API_URL}/messages/${phone}`);
+      const data = await response.json();
+      setMessages(data.reverse());
+    } catch (error) {
+      console.error('Erro ao carregar mensagens:', error);
+    }
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!messageInput.trim() || !activePhone) return;
+
     const tempMessage: Message = {
-      _id: 'temp-' + Date.now(),
-      phone: activePhone,
-      text: messageText,
+      _id: Date.now().toString(),
+      text: messageInput,
       sender: 'agent',
       fromMe: true,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
     setMessages(prev => [...prev, tempMessage]);
+    setMessageInput('');
 
     try {
-      // Envia via backend
-      const response = await fetch(`${API_URL}/api/send-message`, {
+      const response = await fetch(`${API_URL}/send-message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           phone: activePhone,
-          message: messageText
-        })
+          message: messageInput,
+        }),
       });
 
       const data = await response.json();
       console.log('✅ Resposta do envio:', data);
 
-      // Atualiza com mensagens reais após 500ms
-      setTimeout(() => {
-        loadMessages(activePhone, true);
-      }, 500);
+      if (data.sentViaZapi) {
+        console.log('✅ Mensagem enviada via Z-API!');
+      }
 
+      loadChats();
     } catch (error) {
-      console.error('❌ Erro ao enviar:', error);
-      alert('Erro ao enviar mensagem');
+      console.error('❌ Erro ao enviar mensagem:', error);
     }
   };
 
-  // Filtra chats pela busca
-  const filteredChats = chats.filter(chat =>
-    chat.contactName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    chat.phone.includes(searchTerm)
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!confirm('Deseja realmente excluir esta mensagem?')) return;
+
+    try {
+      const response = await fetch(`${API_URL}/messages/${messageId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        setMessages(prev => prev.filter(msg => msg._id !== messageId));
+        console.log('✅ Mensagem excluída');
+      }
+    } catch (error) {
+      console.error('❌ Erro ao excluir mensagem:', error);
+      alert('Erro ao excluir mensagem');
+    }
+  };
+
+  const handleOpenForwardModal = (message: Message) => {
+    setMessageToForward(message);
+    setShowForwardModal(true);
+    setSelectedForwardContacts([]);
+    setForwardSearchTerm('');
+  };
+
+  const toggleSelectContact = (phone: string) => {
+    setSelectedForwardContacts(prev =>
+      prev.includes(phone)
+        ? prev.filter(p => p !== phone)
+        : [...prev, phone]
+    );
+  };
+
+  const handleForwardMessage = async () => {
+    if (selectedForwardContacts.length === 0 || !messageToForward) {
+      alert('Selecione pelo menos um contato');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const promises = selectedForwardContacts.map(phone =>
+        fetch(`${API_URL}/send-message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone: phone,
+            message: `📩 Mensagem encaminhada:\n\n${messageToForward.text}`,
+          }),
+        })
+      );
+
+      await Promise.all(promises);
+
+      alert(`✅ Mensagem encaminhada para ${selectedForwardContacts.length} contato(s)!`);
+      setShowForwardModal(false);
+      setMessageToForward(null);
+      setSelectedForwardContacts([]);
+    } catch (error) {
+      console.error('❌ Erro ao encaminhar:', error);
+      alert('Erro ao encaminhar mensagem');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredForwardContacts = allContacts.filter(contact =>
+    contact.name.toLowerCase().includes(forwardSearchTerm.toLowerCase()) ||
+    contact.phone.includes(forwardSearchTerm)
   );
 
-  const activeChatData = chats.find(c => c.phone === activePhone);
-
   return (
-    <div className="flex h-screen bg-[#0a0e27]">
-      {/* Sidebar - Lista de Chats */}
-      <div className="w-96 bg-[#111827] border-r border-gray-800 flex flex-col">
-        {/* Header */}
-        <div className="p-4 border-b border-gray-800">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-white">Conversas</h2>
-            <button
-              onClick={() => loadChats()}
-              className="text-gray-400 hover:text-white transition-colors"
-              title="Atualizar"
-            >
-              <RefreshCw className="w-5 h-5" />
-            </button>
-          </div>
-          
-          {/* Busca */}
-          <div className="relative">
-            <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar contato..."
-              className="w-full pl-10 pr-4 py-2 bg-[#1f2937] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+    <div className="h-screen flex bg-gray-50">
+      {/* Lista de Chats */}
+      <div className="w-80 bg-white border-r flex flex-col">
+        <div className="p-4 border-b">
+          <h2 className="text-xl font-semibold text-gray-800">Conversas</h2>
         </div>
 
-        {/* Lista de Chats */}
         <div className="flex-1 overflow-y-auto">
-          {isLoadingChats && chats.length === 0 ? (
-            <div className="flex items-center justify-center h-64">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-            </div>
-          ) : filteredChats.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-              <User className="w-12 h-12 mb-2" />
-              <p>Nenhuma conversa ainda</p>
-              <p className="text-sm mt-2">Aguardando mensagens via webhook</p>
+          {chats.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              <p className="text-sm">Nenhuma conversa ainda</p>
+              <p className="text-xs mt-2">Aguardando mensagens via webhook</p>
             </div>
           ) : (
-            filteredChats.map(chat => (
+            chats.map((chat) => (
               <div
                 key={chat.phone}
-                onClick={() => handleChatSelect(chat.phone)}
-                className={`p-4 flex items-start space-x-3 cursor-pointer hover:bg-gray-800 transition-colors border-b border-gray-800 ${
-                  activePhone === chat.phone ? 'bg-gray-800 border-l-4 border-l-blue-500' : ''
+                onClick={() => setActivePhone(chat.phone)}
+                className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition ${
+                  activePhone === chat.phone ? 'bg-green-50 border-l-4 border-l-green-500' : ''
                 }`}
               >
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
-                  <User className="w-6 h-6 text-white" />
-                </div>
-                
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className="font-semibold text-white truncate">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-900">
                       {chat.contactName || chat.phone}
-                    </h3>
-                    {chat.unreadCount > 0 && (
-                      <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-1 rounded-full flex-shrink-0">
-                        {chat.unreadCount}
-                      </span>
-                    )}
+                    </p>
+                    <p className="text-sm text-gray-500 truncate">{chat.lastMessage}</p>
                   </div>
-                  <p className="text-sm text-gray-400 truncate">{chat.phone}</p>
-                  <p className="text-sm text-gray-500 truncate">{chat.lastMessage}</p>
+                  {chat.unreadCount > 0 && (
+                    <span className="bg-green-500 text-white text-xs rounded-full px-2 py-1">
+                      {chat.unreadCount}
+                    </span>
+                  )}
                 </div>
               </div>
             ))
@@ -218,98 +246,174 @@ const Chat: React.FC = () => {
         </div>
       </div>
 
-      {/* Área de Chat */}
+      {/* Área de Mensagens */}
       <div className="flex-1 flex flex-col">
-        {activePhone && activeChatData ? (
+        {activePhone ? (
           <>
-            {/* Header do Chat */}
-            <div className="bg-[#1f2937] p-4 border-b border-gray-800 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                  <User className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-white">
-                    {activeChatData.contactName || 'Desconhecido'}
-                  </h3>
-                  <p className="text-sm text-gray-400">{activePhone}</p>
-                </div>
-              </div>
-              
-              <button
-                onClick={() => loadMessages(activePhone)}
-                className="text-gray-400 hover:text-white transition-colors"
-                title="Atualizar mensagens"
-              >
-                <RefreshCw className="w-5 h-5" />
-              </button>
+            <div className="bg-white border-b p-4">
+              <h3 className="font-semibold text-gray-800">{activePhone}</h3>
             </div>
 
-            {/* Mensagens */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#0a0e27]">
-              {isLoadingMessages && messages.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                </div>
-              ) : (
-                messages.map((msg) => (
-                  <div
-                    key={msg._id}
-                    className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
-                  >
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+              {messages.map((msg) => (
+                <div
+                  key={msg._id}
+                  className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}
+                >
+                  <div className="flex items-end gap-2">
+                    {msg.fromMe && (
+                      <div className="opacity-0 group-hover:opacity-100 transition flex gap-1 mb-1">
+                        <button
+                          onClick={() => handleOpenForwardModal(msg)}
+                          className="p-1.5 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition"
+                          title="Encaminhar"
+                        >
+                          <Forward size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMessage(msg._id)}
+                          className="p-1.5 bg-red-500 text-white rounded-full hover:bg-red-600 transition"
+                          title="Excluir"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
+
                     <div
-                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                      className={`max-w-md px-4 py-2 rounded-2xl ${
                         msg.fromMe
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-[#1f2937] text-white'
+                          ? 'bg-green-500 text-white rounded-br-none'
+                          : 'bg-white text-gray-800 rounded-bl-none shadow'
                       }`}
                     >
-                      <p className="break-words">{msg.text}</p>
-                      <span className="text-xs opacity-70 mt-1 block">
+                      <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
+                      <p
+                        className={`text-xs mt-1 ${
+                          msg.fromMe ? 'text-green-100' : 'text-gray-400'
+                        }`}
+                      >
                         {new Date(msg.timestamp).toLocaleTimeString([], {
                           hour: '2-digit',
-                          minute: '2-digit'
+                          minute: '2-digit',
                         })}
-                      </span>
+                      </p>
                     </div>
                   </div>
-                ))
-              )}
+                </div>
+              ))}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input de Mensagem */}
-            <div className="bg-[#1f2937] p-4 border-t border-gray-800">
-              <div className="flex items-center space-x-2">
+            <form onSubmit={handleSendMessage} className="bg-white border-t p-4">
+              <div className="flex gap-2">
                 <input
                   type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
                   placeholder="Digite uma mensagem..."
-                  className="flex-1 bg-[#0a0e27] rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 px-4 py-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
                 <button
-                  onClick={handleSend}
-                  disabled={!inputValue.trim()}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white p-3 rounded-lg transition-colors"
+                  type="submit"
+                  disabled={!messageInput.trim()}
+                  className="bg-green-500 text-white p-3 rounded-full hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
                 >
-                  <Send className="w-5 h-5" />
+                  <Send size={20} />
                 </button>
               </div>
-            </div>
+            </form>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
-            <User className="w-20 h-20 mb-4 opacity-50" />
-            <h2 className="text-2xl font-bold mb-2">ZapMaster Web</h2>
-            <p>Selecione uma conversa à esquerda para iniciar o atendimento.</p>
-            <p className="text-sm mt-2">Aguardando mensagens via Z-API webhook</p>
+          <div className="flex-1 flex items-center justify-center text-gray-400">
+            <div className="text-center">
+              <p className="text-lg">Selecione uma conversa à esquerda para iniciar o atendimento.</p>
+              <p className="text-sm mt-2">Aguardando mensagens via Z-API webhook</p>
+            </div>
           </div>
         )}
       </div>
+
+      {/* MODAL DE ENCAMINHAR */}
+      {showForwardModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[80vh] flex flex-col">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Encaminhar mensagem</h3>
+              <button
+                onClick={() => setShowForwardModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-4 bg-gray-50 border-b">
+              <p className="text-sm text-gray-600 mb-1">Mensagem:</p>
+              <p className="text-sm bg-white p-2 rounded border italic">
+                "{messageToForward?.text}"
+              </p>
+            </div>
+
+            <div className="p-4 border-b">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  value={forwardSearchTerm}
+                  onChange={(e) => setForwardSearchTerm(e.target.value)}
+                  placeholder="Buscar contato..."
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2">
+              {filteredForwardContacts.length === 0 ? (
+                <p className="text-center text-gray-500 py-8">Nenhum contato encontrado</p>
+              ) : (
+                filteredForwardContacts.map((contact) => (
+                  <div
+                    key={contact._id}
+                    onClick={() => toggleSelectContact(contact.phone)}
+                    className={`p-3 rounded-lg cursor-pointer transition mb-1 flex items-center justify-between ${
+                      selectedForwardContacts.includes(contact.phone)
+                        ? 'bg-green-100 border-2 border-green-500'
+                        : 'bg-gray-50 hover:bg-gray-100'
+                    }`}
+                  >
+                    <div>
+                      <p className="font-medium text-gray-900">{contact.name}</p>
+                      <p className="text-sm text-gray-500">{contact.phone}</p>
+                    </div>
+                    {selectedForwardContacts.includes(contact.phone) && (
+                      <Check size={20} className="text-green-600" />
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-4 border-t flex gap-2">
+              <button
+                onClick={() => setShowForwardModal(false)}
+                className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50 transition"
+                disabled={loading}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleForwardMessage}
+                disabled={selectedForwardContacts.length === 0 || loading}
+                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                {loading ? 'Enviando...' : `Encaminhar (${selectedForwardContacts.length})`}
+              >
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-};
-
-export default Chat;
+}

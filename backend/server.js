@@ -224,7 +224,7 @@ app.delete('/api/contacts/:id', async (req, res) => {
 });
 
 // ============================================
-// ROUTES - ACCOUNTS - CORRIGIDO! 🎯
+// ROUTES - ACCOUNTS
 // ============================================
 app.get('/api/accounts', async (req, res) => {
   try {
@@ -242,7 +242,7 @@ app.post('/api/accounts', async (req, res) => {
     
     const accountData = { ...req.body };
     
-    // 🎯 EXTRAÇÃO AUTOMÁTICA SE CAMPOS ESTIVEREM FALTANDO
+    // EXTRAÇÃO AUTOMÁTICA DE DADOS DA URL
     if (accountData.zApiUrl && !accountData.zApiId && !accountData.zApiToken) {
       console.log('🔍 Extraindo dados da URL Z-API...');
       console.log('📋 URL recebida:', accountData.zApiUrl);
@@ -261,7 +261,6 @@ app.post('/api/accounts', async (req, res) => {
       }
     }
     
-    // Define valores padrão se não fornecidos
     if (!accountData.name) {
       accountData.name = accountData.phoneNumber || accountData.instanceName || 'Conexão 1';
     }
@@ -353,6 +352,26 @@ app.delete('/api/messages/:phone', async (req, res) => {
 });
 
 // ============================================
+// DELETE MENSAGEM POR ID (NOVA ROTA)
+// ============================================
+app.delete('/api/messages/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const message = await Message.findByIdAndDelete(req.params.id);
+    
+    if (!message) {
+      return res.status(404).json({ error: 'Mensagem não encontrada' });
+    }
+    
+    console.log('✅ Mensagem excluída:', req.params.id);
+    res.json({ message: 'Mensagem excluída com sucesso', deletedId: req.params.id });
+  } catch (error) {
+    console.error('❌ Erro ao excluir mensagem:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
 // ROUTES - CHATS
 // ============================================
 app.get('/api/chats', async (req, res) => {
@@ -409,7 +428,7 @@ app.put('/api/campaigns/:id', async (req, res) => {
 });
 
 // ============================================
-// ROTA DE DEBUG - TESTE Z-API 🔍
+// ROTA DE DEBUG - TESTE Z-API
 // ============================================
 app.post('/api/test-zapi', async (req, res) => {
   try {
@@ -782,6 +801,7 @@ app.get('/', (req, res) => {
       contacts: '/api/contacts',
       chats: '/api/chats',
       messages: '/api/messages/:phone',
+      deleteMessage: '/api/messages/:id',
       sendMessage: '/api/send-message',
       testZapi: '/api/test-zapi',
       campaigns: '/api/campaigns',
