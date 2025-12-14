@@ -222,20 +222,17 @@ export const apiService = {
         payload.message = message.trim();
       }
 
-      // ✅ CORREÇÃO: Remover prefixo data:image/xxx;base64, se existir
+      // ✅ TESTE: Enviar COM o prefixo (a Z-API pode precisar dele)
       if (imageBase64 && imageBase64.trim().length > 0) {
-        let cleanImage = imageBase64.trim();
+        let imageToSend = imageBase64.trim();
         
-        // Se tem o prefixo data:image, remove
-        if (cleanImage.startsWith('data:image/')) {
-          const base64Index = cleanImage.indexOf('base64,');
-          if (base64Index !== -1) {
-            cleanImage = cleanImage.substring(base64Index + 7); // Remove "base64,"
-          }
+        // Se NÃO tem o prefixo, adiciona
+        if (!imageToSend.startsWith('data:image/')) {
+          imageToSend = 'data:image/jpeg;base64,' + imageToSend;
         }
         
-        payload.image = cleanImage;
-        console.log('📷 Imagem:', cleanImage.substring(0, 50) + '...');
+        payload.image = imageToSend;
+        console.log('📷 Imagem (com prefixo):', imageToSend.substring(0, 50) + '...');
       }
 
       console.log('📤 Enviando:', { 
