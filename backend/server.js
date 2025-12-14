@@ -375,9 +375,8 @@ app.post('/api/send-message', async (req, res) => {
 
     // ✅ BUSCA CONTA Z-API CONECTADA NO BANCO
     const connectedAccount = await Account.findOne({ 
-      status: 'CONNECTED',
-      zApiUrl: { $exists: true, $ne: '' }
-    });
+  zApiUrl: { $exists: true, $ne: '' }
+}).sort({ createdAt: -1 });
 
     let zapiData = null;
     let messageId = `msg_${Date.now()}`;
