@@ -1,9 +1,7 @@
-import express from 'express';
-import mongoose from 'mongoose';
-import cors from 'cors';
-import dotenv from 'dotenv';
-
-dotenv.config();
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -13,27 +11,23 @@ const PORT = process.env.PORT || 3002;
 // ============================================
 app.use(cors({
   origin: function (origin, callback) {
-    // Permitir requisições sem origin (mobile apps, Postman, etc)
     if (!origin) return callback(null, true);
     
-    // Lista de origens permitidas
     const allowedOrigins = [
       'http://localhost:5173',
       'http://localhost:3000',
       'http://localhost:5174',
     ];
     
-    // Permitir qualquer subdomínio da Vercel
     if (origin.endsWith('.vercel.app')) {
       return callback(null, true);
     }
     
-    // Verificar se está na lista de permitidos
     if (allowedOrigins.indexOf(origin) !== -1) {
       return callback(null, true);
     }
     
-    callback(null, true); // Permitir todas (desenvolvimento)
+    callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -44,11 +38,25 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ============================================
-// MONGODB CONNECTION
+// MONGODB CONNECTION (LAZY)
 // ============================================
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅ MongoDB conectado com sucesso!'))
-  .catch((err) => console.error('❌ Erro ao conectar no MongoDB:', err));
+let isConnected = false;
+
+const connectDB = async () => {
+  if (isConnected) return;
+  
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
+    isConnected = true;
+    console.log('✅ MongoDB conectado');
+  } catch (error) {
+    console.error('❌ Erro MongoDB:', error.message);
+    throw error;
+  }
+};
 
 // ============================================
 // SCHEMAS
@@ -85,7 +93,6 @@ const messageSchema = new mongoose.Schema({
   accountId: mongoose.Schema.Types.ObjectId,
   metadata: mongoose.Schema.Types.Mixed
 }, { timestamps: true });
-
 messageSchema.index({ phone: 1, timestamp: -1 });
 
 const chatSchema = new mongoose.Schema({
@@ -101,8 +108,8 @@ const chatSchema = new mongoose.Schema({
 
 const campaignSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  status: { 
-    type: String, 
+  status: {
+    type: String,
     enum: ['DRAFT', 'SCHEDULED', 'SENDING', 'COMPLETED', 'PAUSED', 'CANCELLED'],
     default: 'DRAFT'
   },
@@ -124,7 +131,6 @@ const campaignSchema = new mongoose.Schema({
   startedAt: Date,
   completedAt: Date
 }, { timestamps: true });
-
 campaignSchema.index({ status: 1, createdAt: -1 });
 
 const Contact = mongoose.model('Contact', contactSchema);
@@ -138,9 +144,9 @@ const Campaign = mongoose.model('Campaign', campaignSchema);
 // ============================================
 app.get('/api/contacts', async (req, res) => {
   try {
+    await connectDB();
     const { status, tag, search } = req.query;
     let query = {};
-    
     if (status) query.status = status;
     if (tag) query.tags = tag;
     if (search) {
@@ -149,7 +155,6 @@ app.get('/api/contacts', async (req, res) => {
         { phone: new RegExp(search, 'i') }
       ];
     }
-    
     const contacts = await Contact.find(query).sort({ createdAt: -1 });
     res.json(contacts);
   } catch (error) {
@@ -159,6 +164,7 @@ app.get('/api/contacts', async (req, res) => {
 
 app.post('/api/contacts', async (req, res) => {
   try {
+    await connectDB();
     const contact = new Contact(req.body);
     await contact.save();
     res.status(201).json(contact);
@@ -173,6 +179,7 @@ app.post('/api/contacts', async (req, res) => {
 
 app.post('/api/contacts/bulk', async (req, res) => {
   try {
+    await connectDB();
     const { contacts } = req.body;
     const results = await Contact.insertMany(contacts, { ordered: false });
     res.json({ count: results.length, contacts: results });
@@ -188,6 +195,7 @@ app.post('/api/contacts/bulk', async (req, res) => {
 
 app.put('/api/contacts/:id', async (req, res) => {
   try {
+    await connectDB();
     const contact = await Contact.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -202,6 +210,7 @@ app.put('/api/contacts/:id', async (req, res) => {
 
 app.delete('/api/contacts/:id', async (req, res) => {
   try {
+    await connectDB();
     const contact = await Contact.findByIdAndDelete(req.params.id);
     if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
     res.json({ message: 'Contato excluído' });
@@ -215,6 +224,7 @@ app.delete('/api/contacts/:id', async (req, res) => {
 // ============================================
 app.get('/api/accounts', async (req, res) => {
   try {
+    await connectDB();
     const accounts = await Account.find().sort({ createdAt: -1 });
     res.json(accounts);
   } catch (error) {
@@ -224,6 +234,7 @@ app.get('/api/accounts', async (req, res) => {
 
 app.post('/api/accounts', async (req, res) => {
   try {
+    await connectDB();
     const account = new Account(req.body);
     await account.save();
     res.status(201).json(account);
@@ -234,6 +245,7 @@ app.post('/api/accounts', async (req, res) => {
 
 app.put('/api/accounts/:id', async (req, res) => {
   try {
+    await connectDB();
     const account = await Account.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -248,6 +260,7 @@ app.put('/api/accounts/:id', async (req, res) => {
 
 app.delete('/api/accounts/:id', async (req, res) => {
   try {
+    await connectDB();
     const account = await Account.findByIdAndDelete(req.params.id);
     if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
     res.json({ message: 'Conta excluída' });
@@ -261,11 +274,11 @@ app.delete('/api/accounts/:id', async (req, res) => {
 // ============================================
 app.get('/api/messages/:phone', async (req, res) => {
   try {
+    await connectDB();
     const messages = await Message.find({ phone: req.params.phone })
       .sort({ timestamp: -1 })
       .limit(100);
     
-    // Sanitiza mensagens para garantir que sempre tenham dados válidos
     const sanitizedMessages = messages.map(msg => ({
       ...msg.toObject(),
       text: msg.text || '',
@@ -282,6 +295,7 @@ app.get('/api/messages/:phone', async (req, res) => {
 
 app.delete('/api/messages/:phone', async (req, res) => {
   try {
+    await connectDB();
     await Message.deleteMany({ phone: req.params.phone });
     res.json({ message: 'Mensagens excluídas' });
   } catch (error) {
@@ -294,6 +308,7 @@ app.delete('/api/messages/:phone', async (req, res) => {
 // ============================================
 app.get('/api/chats', async (req, res) => {
   try {
+    await connectDB();
     const chats = await Chat.find()
       .sort({ lastMessageAt: -1 })
       .limit(50);
@@ -308,6 +323,7 @@ app.get('/api/chats', async (req, res) => {
 // ============================================
 app.get('/api/campaigns', async (req, res) => {
   try {
+    await connectDB();
     const campaigns = await Campaign.find()
       .populate('accountId')
       .sort({ createdAt: -1 });
@@ -319,6 +335,7 @@ app.get('/api/campaigns', async (req, res) => {
 
 app.post('/api/campaigns', async (req, res) => {
   try {
+    await connectDB();
     const campaign = new Campaign(req.body);
     await campaign.save();
     res.status(201).json(campaign);
@@ -329,6 +346,7 @@ app.post('/api/campaigns', async (req, res) => {
 
 app.put('/api/campaigns/:id', async (req, res) => {
   try {
+    await connectDB();
     const campaign = await Campaign.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -342,17 +360,16 @@ app.put('/api/campaigns/:id', async (req, res) => {
 });
 
 // ============================================
-// WEBHOOK - CORRIGIDO PARA INCLUIR CONTACTNAME
+// WEBHOOK
 // ============================================
 app.post('/webhook', async (req, res) => {
   try {
+    await connectDB();
     console.log('📨 Webhook recebido:', JSON.stringify(req.body, null, 2));
     
     const { phone, text, fromMe, messageId, message, senderName, pushName, notifyName } = req.body;
     
-    // Extrair texto corretamente (Z-API envia em formatos diferentes)
     let messageText = '';
-    
     if (typeof text === 'string') {
       messageText = text;
     } else if (typeof text === 'object' && text !== null) {
@@ -366,7 +383,6 @@ app.post('/webhook', async (req, res) => {
       else if (message.conversation) messageText = message.conversation;
     }
     
-    // Fallback: tentar pegar qualquer texto do body
     if (!messageText && req.body.data && req.body.data.message) {
       if (typeof req.body.data.message === 'string') {
         messageText = req.body.data.message;
@@ -376,14 +392,13 @@ app.post('/webhook', async (req, res) => {
     }
     
     if (phone && messageText) {
-      const normalizedPhone = phone.replace(/\D/g, ''); // Remove apenas caracteres não numéricos
+      const normalizedPhone = phone.replace(/\D/g, '');
       
-      // ✅ EXTRAÇÃO DO NOME DO CONTATO
-      const contactName = senderName || pushName || notifyName || 
-                         req.body.data?.senderName || 
-                         req.body.data?.pushName || 
-                         req.body.data?.notifyName ||
-                         normalizedPhone; // Fallback para o número
+      const contactName = senderName || pushName || notifyName ||
+        req.body.data?.senderName ||
+        req.body.data?.pushName ||
+        req.body.data?.notifyName ||
+        normalizedPhone;
       
       const newMessage = new Message({
         messageId: messageId || `msg_${Date.now()}`,
@@ -401,7 +416,7 @@ app.post('/webhook', async (req, res) => {
         { phone: normalizedPhone },
         {
           phone: normalizedPhone,
-          contactName: contactName, // ✅ ADICIONA O NOME AQUI
+          contactName: contactName,
           lastMessage: messageText,
           lastMessageAt: new Date(),
           $inc: { unreadCount: fromMe ? 0 : 1 }
@@ -411,7 +426,7 @@ app.post('/webhook', async (req, res) => {
       
       console.log('✅ Mensagem salva:', normalizedPhone, '-', messageText, '- Nome:', contactName);
     } else {
-      console.log('⚠️ Webhook sem phone ou text válido:', { phone, text, message, messageText });
+      console.log('⚠️ Webhook sem phone ou text válido');
     }
     
     res.status(200).json({ success: true });
@@ -426,6 +441,8 @@ app.post('/webhook', async (req, res) => {
 // ============================================
 app.get('/api/stats', async (req, res) => {
   try {
+    await connectDB();
+    
     const [totalContacts, blockedContacts, validContacts, onlineAccounts, totalMessages, activeCampaigns] = await Promise.all([
       Contact.countDocuments(),
       Contact.countDocuments({ status: 'BLOCKED' }),
