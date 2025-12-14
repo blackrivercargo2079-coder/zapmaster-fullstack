@@ -91,33 +91,47 @@ const Chat: React.FC = () => {
     loadMessages(phone);
   };
 
-  // Envia mensagem (simulado - precisa configurar Z-API)
+  // Envia mensagem
   const handleSend = async () => {
     if (!inputValue.trim() || !activePhone) return;
 
+    const messageText = inputValue;
+    setInputValue(''); // Limpa input imediatamente
+
+    // Adiciona mensagem otimista (aparece instantaneamente)
     const tempMessage: Message = {
       _id: 'temp-' + Date.now(),
       phone: activePhone,
-      text: inputValue,
+      text: messageText,
       sender: 'agent',
       fromMe: true,
       timestamp: new Date()
     };
 
     setMessages(prev => [...prev, tempMessage]);
-    const messageText = inputValue;
-    setInputValue('');
 
     try {
-      // TODO: Integrar com Z-API para envio real
-      console.log('📤 Enviando via Z-API:', messageText, 'para:', activePhone);
-      
-      // Simula envio bem-sucedido
+      // Envia via backend
+      const response = await fetch(`${API_URL}/api/send-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: activePhone,
+          message: messageText
+        })
+      });
+
+      const data = await response.json();
+      console.log('✅ Resposta do envio:', data);
+
+      // Atualiza com mensagens reais após 500ms
       setTimeout(() => {
         loadMessages(activePhone, true);
-      }, 1000);
+      }, 500);
+
     } catch (error) {
       console.error('❌ Erro ao enviar:', error);
+      alert('Erro ao enviar mensagem');
     }
   };
 
@@ -169,7 +183,7 @@ const Chat: React.FC = () => {
             <div className="flex flex-col items-center justify-center h-64 text-gray-500">
               <User className="w-12 h-12 mb-2" />
               <p>Nenhuma conversa ainda</p>
-              <p className="text-sm">Aguardando mensagens via webhook</p>
+              <p className="text-sm mt-2">Aguardando mensagens via webhook</p>
             </div>
           ) : (
             filteredChats.map(chat => (

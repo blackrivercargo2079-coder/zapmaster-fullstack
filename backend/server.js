@@ -360,6 +360,58 @@ app.put('/api/campaigns/:id', async (req, res) => {
 });
 
 // ============================================
+// SEND MESSAGE VIA Z-API
+// ============================================
+app.post('/api/send-message', async (req, res) => {
+  try {
+    await connectDB();
+    const { phone, message } = req.body;
+    
+    if (!phone || !message) {
+      return res.status(400).json({ error: 'Phone e message são obrigatórios' });
+    }
+
+    console.log('📤 Enviando mensagem:', message, 'para:', phone);
+
+    // TODO: Integrar com Z-API real aqui
+    // Por enquanto, salva direto no banco como enviada
+    const newMessage = new Message({
+      messageId: `msg_${Date.now()}`,
+      phone: phone.replace(/\D/g, ''),
+      sender: 'agent',
+      text: message,
+      fromMe: true,
+      timestamp: new Date(),
+      metadata: { source: 'web-interface' }
+    });
+
+    await newMessage.save();
+
+    // Atualiza chat
+    await Chat.findOneAndUpdate(
+      { phone: phone.replace(/\D/g, '') },
+      {
+        phone: phone.replace(/\D/g, ''),
+        lastMessage: message,
+        lastMessageAt: new Date()
+      },
+      { upsert: true, new: true }
+    );
+
+    console.log('✅ Mensagem salva no banco');
+
+    res.json({ 
+      success: true, 
+      messageId: newMessage.messageId,
+      message: 'Mensagem enviada (Z-API integração pendente)' 
+    });
+  } catch (error) {
+    console.error('❌ Erro ao enviar:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
 // WEBHOOK
 // ============================================
 app.post('/webhook', async (req, res) => {
