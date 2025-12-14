@@ -360,7 +360,7 @@ app.put('/api/campaigns/:id', async (req, res) => {
 });
 
 // ============================================
-// SEND MESSAGE VIA Z-API
+// SEND MESSAGE VIA Z-API (USA CONTA DA INTERFACE)
 // ============================================
 app.post('/api/send-message', async (req, res) => {
   try {
@@ -373,16 +373,70 @@ app.post('/api/send-message', async (req, res) => {
 
     console.log('📤 Enviando mensagem:', message, 'para:', phone);
 
-    // TODO: Integrar com Z-API real aqui
-    // Por enquanto, salva direto no banco como enviada
+    // ✅ BUSCA CONTA Z-API CONECTADA NO BANCO
+    const connectedAccount = await Account.findOne({ 
+      status: 'CONNECTED',
+      zApiUrl: { $exists: true },
+      zApiId: { $exists: true },
+      zApiToken: { $exists: true }
+    });
+
+    let zapiData = null;
+    let messageId = `msg_${Date.now()}`;
+    let sentViaZapi = false;
+
+    // ✅ Se encontrou conta configurada, envia via Z-API
+    if (connectedAccount && connectedAccount.zApiUrl && connectedAccount.zApiId && connectedAccount.zApiToken) {
+      try {
+        console.log('🔗 Usando conta:', connectedAccount.name, '- Instance:', connectedAccount.zApiId);
+
+        const zapiUrl = `${connectedAccount.zApiUrl}/instances/${connectedAccount.zApiId}/token/${connectedAccount.zApiToken}/send-text`;
+        
+        const zapiResponse = await fetch(zapiUrl, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Client-Token': connectedAccount.zApiClientToken || ''
+          },
+          body: JSON.stringify({
+            phone: phone.replace(/\D/g, ''),
+            message: message
+          })
+        });
+
+        zapiData = await zapiResponse.json();
+        console.log('📨 Resposta Z-API:', zapiData);
+
+        if (zapiData && zapiData.messageId) {
+          messageId = zapiData.messageId;
+          sentViaZapi = true;
+        }
+
+        if (!zapiResponse.ok) {
+          console.error('❌ Erro na resposta Z-API:', zapiData);
+        }
+
+      } catch (zapiError) {
+        console.error('⚠️ Erro ao enviar via Z-API:', zapiError.message);
+      }
+    } else {
+      console.warn('⚠️ Nenhuma conta Z-API conectada encontrada');
+    }
+
+    // ✅ Salva no banco (sempre salva, independente do Z-API)
     const newMessage = new Message({
-      messageId: `msg_${Date.now()}`,
+      messageId: messageId,
       phone: phone.replace(/\D/g, ''),
       sender: 'agent',
       text: message,
       fromMe: true,
       timestamp: new Date(),
-      metadata: { source: 'web-interface' }
+      accountId: connectedAccount?._id,
+      metadata: { 
+        source: 'web-interface', 
+        zapiResponse: zapiData,
+        accountUsed: connectedAccount?.name
+      }
     });
 
     await newMessage.save();
@@ -393,18 +447,22 @@ app.post('/api/send-message', async (req, res) => {
       {
         phone: phone.replace(/\D/g, ''),
         lastMessage: message,
-        lastMessageAt: new Date()
+        lastMessageAt: new Date(),
+        accountId: connectedAccount?._id
       },
       { upsert: true, new: true }
     );
 
-    console.log('✅ Mensagem salva no banco');
+    console.log(sentViaZapi ? '✅ Mensagem enviada via Z-API e salva' : '⚠️ Mensagem salva apenas no banco');
 
     res.json({ 
       success: true, 
-      messageId: newMessage.messageId,
-      message: 'Mensagem enviada (Z-API integração pendente)' 
+      messageId: messageId,
+      sentViaZapi: sentViaZapi,
+      accountUsed: connectedAccount?.name || 'Nenhuma',
+      zapiResponse: zapiData
     });
+
   } catch (error) {
     console.error('❌ Erro ao enviar:', error);
     res.status(500).json({ error: error.message });
@@ -412,7 +470,7 @@ app.post('/api/send-message', async (req, res) => {
 });
 
 // ============================================
-// WEBHOOK
+// WEBHOOK - Z-API
 // ============================================
 app.post('/webhook', async (req, res) => {
   try {
@@ -522,10 +580,14 @@ app.get('/api/stats', async (req, res) => {
 // ============================================
 app.get('/health', async (req, res) => {
   try {
+    await connectDB();
     const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
+    const connectedAccount = await Account.findOne({ status: 'CONNECTED' });
+    
     res.json({
       status: 'OK',
       mongodb: dbStatus,
+      zapiAccount: connectedAccount ? connectedAccount.name : 'Nenhuma conectada',
       timestamp: new Date().toISOString(),
       uptime: process.uptime()
     });
