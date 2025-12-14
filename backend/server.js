@@ -755,13 +755,12 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ============================================
-// ROUTE - SEND MESSAGE (Z-API)
+// ROUTE - SEND MESSAGE (Z-API) - OTIMIZADO
 // ============================================
 app.post('/api/send-message', async (req, res) => {
   try {
     const { phone, message, image } = req.body;
     
-    // Validação básica
     if (!phone) {
       return res.status(400).json({ 
         success: false, 
@@ -769,7 +768,6 @@ app.post('/api/send-message', async (req, res) => {
       });
     }
     
-    // Precisa ter pelo menos mensagem OU imagem
     if (!message && !image) {
       return res.status(400).json({ 
         success: false, 
@@ -777,7 +775,6 @@ app.post('/api/send-message', async (req, res) => {
       });
     }
     
-    // Buscar conta ativa (Z-API configurada)
     const activeAccount = await Account.findOne({ 
       status: 'CONNECTED',
       zApiUrl: { $exists: true, $ne: null }
@@ -792,29 +789,35 @@ app.post('/api/send-message', async (req, res) => {
     
     const cleanPhone = phone.replace(/\D/g, '');
     
-    // ✅ LIMPAR URL DA Z-API (remover /token/xxx se presente)
+    // Limpar URL da Z-API
     let baseUrl = activeAccount.zApiUrl;
     if (baseUrl.includes('/token/')) {
       baseUrl = baseUrl.substring(0, baseUrl.indexOf('/token/'));
     }
-    // Remover barra final se houver
     if (baseUrl.endsWith('/')) {
       baseUrl = baseUrl.slice(0, -1);
     }
     
-    // Decidir endpoint baseado no tipo de envio
     let endpoint = `${baseUrl}/send-text`;
     const body = { phone: cleanPhone };
     
-    // Se tem imagem, usa send-image
     if (image) {
       endpoint = `${baseUrl}/send-image`;
-      body.image = image;
-      if (message) {
-        body.caption = message; // Legenda da imagem
+      
+      // ✅ GARANTIR que tem prefixo data:image
+      let imageToSend = image.trim();
+      if (!imageToSend.startsWith('data:image')) {
+        imageToSend = 'data:image/jpeg;base64,' + imageToSend;
       }
+      
+      body.image = imageToSend;
+      
+      if (message) {
+        body.caption = message;
+      }
+      
+      console.log('📷 Tamanho da imagem:', imageToSend.length, 'bytes');
     } else {
-      // Só texto
       body.message = message;
     }
     
@@ -840,7 +843,7 @@ app.post('/api/send-message', async (req, res) => {
     
     if (response.ok) {
       const msgId = resData.messageId || resData.id || resData.zaapId;
-      console.log('✅ Mensagem enviada:', msgId);
+      console.log('✅ Mensagem enviada via Z-API:', msgId);
       
       return res.json({
         success: true,

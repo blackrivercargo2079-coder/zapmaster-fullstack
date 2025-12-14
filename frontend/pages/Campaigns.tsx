@@ -169,7 +169,7 @@ const Campaigns: React.FC = () => {
     fetchSegmentCounts();
   }, [selectedSegment]);
 
-  // Função para comprimir imagem
+  // ✅ Função OTIMIZADA para comprimir imagem MUITO MAIS
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -179,8 +179,10 @@ const Campaigns: React.FC = () => {
         img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 1024;
-          const MAX_HEIGHT = 1024;
+          
+          // ✅ REDUZIR MAIS: 800x800 ao invés de 1024x1024
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
           let width = img.width;
           let height = img.height;
 
@@ -200,7 +202,22 @@ const Campaigns: React.FC = () => {
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.7));
+          
+          // ✅ COMPRIMIR MAIS: qualidade 0.5 ao invés de 0.7
+          let base64 = canvas.toDataURL('image/jpeg', 0.5);
+          
+          // ✅ REMOVER PREFIXO: Envia só o base64 puro
+          if (base64.includes('base64,')) {
+            base64 = base64.split('base64,')[1];
+          }
+          
+          console.log('📷 Imagem comprimida:', {
+            originalSize: file.size,
+            compressedSize: base64.length,
+            reduction: Math.round((1 - base64.length / file.size) * 100) + '%'
+          });
+          
+          resolve(base64);
         };
         img.onerror = (error) => reject(error);
       };
@@ -324,68 +341,51 @@ const Campaigns: React.FC = () => {
       const contact = targetContacts[i];
       setCurrentContactName(contact.name);
 
-      // 📝 Montar mensagem completa
-      let fullMessage = message;
-      
-      // Adicionar CTA se houver
+      let mainMessage = message;
       if (ctaText && ctaLink) {
-        fullMessage += `\n\n${ctaText}: ${ctaLink}`;
-      }
-      
-      // Adicionar opção de descadastro se habilitado
-      if (unsubscribe) {
-        fullMessage += `\n\nCaso não queira receber mais mensagens, responda Sair.`;
+        mainMessage += `\n\n${ctaText}: ${ctaLink}`;
       }
 
-      console.log(`--- Iniciando Disparo: Texto -> Imagens -> Descadastre ---`);
+      const footerMessage = `Caso não queira receber mais mensagens, responda Sair.`;
       console.log(`Enviando ${i + 1}/${targetContacts.length} para ${contact.phone}...`);
-      console.log(`Conta usada: ${connectedAccount.name}`);
 
       let contactSuccess = true;
       let contactError: string | null = null;
 
       try {
-        // 🔥 CORREÇÃO: Enviar TUDO DE UMA VEZ
-        // Se tem imagem, envia imagem com caption (texto)
-        if (banners.length > 0) {
+        // ETAPA 1: Texto
+        if (mainMessage.trim()) {
+          const textResult = await apiService.sendMessage(connectedAccount, contact.phone, mainMessage);
+          if (!textResult.success) {
+            contactSuccess = false;
+            contactError = textResult.error || 'Erro desconhecido';
+          }
+          if (contactSuccess && banners.length > 0 && mainMessage.trim()) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
+        }
+
+        // ETAPA 2: Imagens
+        if (contactSuccess && banners.length > 0) {
           for (const banner of banners) {
-            const result = await apiService.sendMessage(
-              connectedAccount, 
-              contact.phone, 
-              fullMessage, // Texto completo (mensagem + CTA + descadastro)
-              banner       // Imagem
-            );
-            
-            if (!result.success) {
+            const imgResult = await apiService.sendMessage(connectedAccount, contact.phone, '', banner);
+            if (!imgResult.success) {
               contactSuccess = false;
-              contactError = result.error || 'Erro ao enviar';
+              contactError = imgResult.error || 'Erro ao enviar imagem';
               break;
             }
-            
-            console.log('✅ Mensagem enviada:', result.messageId);
-            
-            // Se tem múltiplas imagens, aguarda entre elas
             if (banners.length > 1) {
-              await new Promise(resolve => setTimeout(resolve, 1500));
+              await new Promise(resolve => setTimeout(resolve, 1000));
             }
-            
-            // ⚠️ IMPORTANTE: Só envia o texto uma vez (na primeira imagem)
-            // Nas próximas imagens, não repete o texto
-            fullMessage = '';
           }
-        } else {
-          // Se NÃO tem imagem, envia só o texto
-          const result = await apiService.sendMessage(
-            connectedAccount, 
-            contact.phone, 
-            fullMessage
-          );
-          
-          if (!result.success) {
-            contactSuccess = false;
-            contactError = result.error || 'Erro ao enviar';
-          } else {
-            console.log('✅ Mensagem enviada:', result.messageId);
+        }
+
+        // ETAPA 3: Descadastre
+        if (contactSuccess && unsubscribe) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          const footerResult = await apiService.sendMessage(connectedAccount, contact.phone, footerMessage);
+          if (!footerResult.success) {
+            console.warn('Falha ao enviar footer de descadastre:', footerResult.error);
           }
         }
       } catch (err: any) {
