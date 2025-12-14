@@ -360,7 +360,7 @@ app.put('/api/campaigns/:id', async (req, res) => {
 });
 
 // ============================================
-// SEND MESSAGE VIA Z-API (USA CONTA DA INTERFACE)
+// SEND MESSAGE VIA Z-API (EXTRAI DA URL)
 // ============================================
 app.post('/api/send-message', async (req, res) => {
   try {
@@ -376,9 +376,7 @@ app.post('/api/send-message', async (req, res) => {
     // ✅ BUSCA CONTA Z-API CONECTADA NO BANCO
     const connectedAccount = await Account.findOne({ 
       status: 'CONNECTED',
-      zApiUrl: { $exists: true },
-      zApiId: { $exists: true },
-      zApiToken: { $exists: true }
+      zApiUrl: { $exists: true, $ne: '' }
     });
 
     let zapiData = null;
@@ -386,18 +384,35 @@ app.post('/api/send-message', async (req, res) => {
     let sentViaZapi = false;
 
     // ✅ Se encontrou conta configurada, envia via Z-API
-    if (connectedAccount && connectedAccount.zApiUrl && connectedAccount.zApiId && connectedAccount.zApiToken) {
+    if (connectedAccount && connectedAccount.zApiUrl) {
       try {
-        console.log('🔗 Usando conta:', connectedAccount.name, '- Instance:', connectedAccount.zApiId);
+        console.log('🔗 Usando conta:', connectedAccount.name);
+        console.log('📍 URL Z-API:', connectedAccount.zApiUrl);
 
-        const zapiUrl = `${connectedAccount.zApiUrl}/instances/${connectedAccount.zApiId}/token/${connectedAccount.zApiToken}/send-text`;
+        // Extrai instance e token da URL
+        // Formato esperado: https://api.z-api.io/instances/{INSTANCE}/token/{TOKEN}/...
+        const urlMatch = connectedAccount.zApiUrl.match(/instances\/([^\/]+)\/token\/([^\/]+)/);
         
-        const zapiResponse = await fetch(zapiUrl, {
+        if (!urlMatch) {
+          console.error('❌ URL Z-API inválida. Formato esperado: https://api.z-api.io/instances/{INSTANCE}/token/{TOKEN}');
+          throw new Error('URL Z-API mal formatada');
+        }
+
+        const [, instanceId, token] = urlMatch;
+        console.log('🔑 Instance:', instanceId);
+        console.log('🔐 Token:', token.substring(0, 10) + '...');
+
+        // Monta URL de envio
+        const sendUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
+        
+        const headers = { 'Content-Type': 'application/json' };
+        if (connectedAccount.zApiClientToken) {
+          headers['Client-Token'] = connectedAccount.zApiClientToken;
+        }
+
+        const zapiResponse = await fetch(sendUrl, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Client-Token': connectedAccount.zApiClientToken || ''
-          },
+          headers: headers,
           body: JSON.stringify({
             phone: phone.replace(/\D/g, ''),
             message: message
@@ -405,7 +420,7 @@ app.post('/api/send-message', async (req, res) => {
         });
 
         zapiData = await zapiResponse.json();
-        console.log('📨 Resposta Z-API:', zapiData);
+        console.log('📨 Resposta Z-API:', JSON.stringify(zapiData));
 
         if (zapiData && zapiData.messageId) {
           messageId = zapiData.messageId;
