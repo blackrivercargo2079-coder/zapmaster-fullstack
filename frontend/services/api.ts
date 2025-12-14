@@ -222,15 +222,27 @@ export const apiService = {
         payload.message = message.trim();
       }
 
-      // Adicionar imagem se houver
+      // ✅ CORREÇÃO: Remover prefixo data:image/xxx;base64, se existir
       if (imageBase64 && imageBase64.trim().length > 0) {
-        payload.image = imageBase64;
+        let cleanImage = imageBase64.trim();
+        
+        // Se tem o prefixo data:image, remove
+        if (cleanImage.startsWith('data:image/')) {
+          const base64Index = cleanImage.indexOf('base64,');
+          if (base64Index !== -1) {
+            cleanImage = cleanImage.substring(base64Index + 7); // Remove "base64,"
+          }
+        }
+        
+        payload.image = cleanImage;
+        console.log('📷 Imagem:', cleanImage.substring(0, 50) + '...');
       }
 
       console.log('📤 Enviando:', { 
         phone: cleanPhone, 
         hasMessage: !!payload.message, 
-        hasImage: !!payload.image 
+        hasImage: !!payload.image,
+        imageSize: payload.image ? payload.image.length : 0
       });
 
       const response = await fetch(`${WEBHOOK_SERVER}/api/send-message`, {
