@@ -468,10 +468,15 @@ app.get('/health', async (req, res) => {
 // ============================================
 // START SERVER
 // ============================================
-app.listen(PORT, () => {
-  console.log('\n🚀 ZapMaster Pro Backend');
-  console.log(`📡 Servidor: http://localhost:${PORT}`);
-  console.log(`🔗 Webhook: http://localhost:${PORT}/webhook`);
-  console.log(`💚 Health: http://localhost:${PORT}/health`);
-  console.log(`📊 Stats: http://localhost:${PORT}/api/stats\n`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`🚀 ZapMaster Pro Backend`);
+    console.log(`📂 Servidor: http://localhost:${PORT}`);
+    console.log(`🔗 Webhook: http://localhost:${PORT}/webhook`);
+    console.log(`💚 Health: http://localhost:${PORT}/health`);
+    console.log(`📊 Stats: http://localhost:${PORT}/api/stats\n`);
+  });
+}
+
+// Para Vercel (serverless)
+module.exports = app;
