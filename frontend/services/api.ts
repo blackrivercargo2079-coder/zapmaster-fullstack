@@ -69,11 +69,6 @@ const ensureBrPrefix = (phone: string) => {
   return clean;
 };
 
-const isProduction = () => {
-  const { apiUrl } = getSettings();
-  return !!apiUrl && apiUrl.trim().length > 0;
-};
-
 const WEBHOOK_SERVER = import.meta.env.VITE_API_URL || 'http://localhost:3002';
 
 export const apiServiceWebhook = {
@@ -82,11 +77,11 @@ export const apiServiceWebhook = {
       const response = await fetch(`${WEBHOOK_SERVER}/api/chats`);
       if (response.ok) {
         const chats = await response.json();
-        console.log('Chats carregados do webhook:', chats.length);
+        console.log('✅ Chats carregados do webhook:', chats.length);
         return chats;
       }
     } catch (e) {
-      console.log('Servidor webhook offline');
+      console.log('⚠️ Servidor webhook offline');
     }
     return [];
   },
@@ -107,11 +102,11 @@ export const apiServiceWebhook = {
       const response = await fetch(`${WEBHOOK_SERVER}/api/messages/${cleanPhone}`);
       if (response.ok) {
         const messages = await response.json();
-        console.log('Mensagens carregadas:', messages.length);
+        console.log('✅ Mensagens carregadas:', messages.length);
         return messages;
       }
     } catch (e) {
-      console.log('Servidor webhook offline');
+      console.log('⚠️ Servidor webhook offline');
     }
 
     return [];
@@ -208,6 +203,7 @@ export const apiService = {
     }
   },
 
+  // ✅ CORRIGIDO: Agora suporta envio de imagens
   async sendMessage(account: Account, phone: string, message?: string, imageBase64?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
     if (!phone) {
       return { success: false, error: 'Telefone não fornecido' };
@@ -216,29 +212,50 @@ export const apiService = {
     const cleanPhone = ensureBrPrefix(phone.replace(/\D/g, ''));
 
     try {
+      // Preparar payload
+      const payload: any = {
+        phone: cleanPhone
+      };
+
+      // Adicionar mensagem de texto se houver
+      if (message && message.trim().length > 0) {
+        payload.message = message.trim();
+      }
+
+      // Adicionar imagem se houver
+      if (imageBase64 && imageBase64.trim().length > 0) {
+        payload.image = imageBase64;
+      }
+
+      console.log('📤 Enviando:', { 
+        phone: cleanPhone, 
+        hasMessage: !!payload.message, 
+        hasImage: !!payload.image 
+      });
+
       const response = await fetch(`${WEBHOOK_SERVER}/api/send-message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: cleanPhone,
-          message: message || ''
-        })
+        body: JSON.stringify(payload)
       });
 
       const resData = await response.json();
 
       if (response.ok && resData.success) {
+        console.log('✅ Mensagem enviada:', resData.messageId);
         return {
           success: true,
           messageId: resData.messageId
         };
       }
 
+      console.error('❌ Erro ao enviar:', resData.error);
       return {
         success: false,
         error: resData.error || 'Erro ao enviar'
       };
     } catch (e: any) {
+      console.error('❌ Erro de rede:', e.message);
       return { success: false, error: e.message };
     }
   },
