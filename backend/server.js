@@ -224,7 +224,7 @@ app.delete('/api/contacts/:id', async (req, res) => {
 });
 
 // ============================================
-// ROUTES - ACCOUNTS
+// ROUTES - ACCOUNTS - CORRIGIDO! 🎯
 // ============================================
 app.get('/api/accounts', async (req, res) => {
   try {
@@ -239,11 +239,55 @@ app.get('/api/accounts', async (req, res) => {
 app.post('/api/accounts', async (req, res) => {
   try {
     await connectDB();
-    const account = new Account(req.body);
+    
+    const accountData = { ...req.body };
+    
+    // 🎯 EXTRAÇÃO AUTOMÁTICA SE CAMPOS ESTIVEREM FALTANDO
+    if (accountData.zApiUrl && !accountData.zApiId && !accountData.zApiToken) {
+      console.log('🔍 Extraindo dados da URL Z-API...');
+      console.log('📋 URL recebida:', accountData.zApiUrl);
+      
+      const urlMatch = accountData.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
+      
+      if (urlMatch && urlMatch.length >= 3) {
+        accountData.zApiId = urlMatch[1];
+        accountData.zApiToken = urlMatch[2];
+        accountData.instanceName = urlMatch[1];
+        
+        console.log('✅ Instance ID extraído:', accountData.zApiId);
+        console.log('✅ Token extraído:', accountData.zApiToken.substring(0, 10) + '...');
+      } else {
+        console.warn('⚠️ Não foi possível extrair dados da URL');
+      }
+    }
+    
+    // Define valores padrão se não fornecidos
+    if (!accountData.name) {
+      accountData.name = accountData.phoneNumber || accountData.instanceName || 'Conexão 1';
+    }
+    
+    if (!accountData.status) {
+      accountData.status = 'CONNECTED';
+    }
+    
+    if (!accountData.connectionType) {
+      accountData.connectionType = 'Z-API';
+    }
+    
+    console.log('💾 Salvando conta com dados:', {
+      name: accountData.name,
+      instanceName: accountData.instanceName,
+      zApiId: accountData.zApiId,
+      hasClientToken: !!accountData.zApiClientToken
+    });
+    
+    const account = new Account(accountData);
     await account.save();
-    console.log('✅ CONTA CADASTRADA:', account);
+    
+    console.log('✅ CONTA CADASTRADA COM SUCESSO:', account.name);
     res.status(201).json(account);
   } catch (error) {
+    console.error('❌ Erro ao cadastrar conta:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -375,7 +419,6 @@ app.post('/api/test-zapi', async (req, res) => {
     
     console.log('🔍 DEBUG - Buscando conta...');
     
-    // Busca conta
     const account = await Account.findOne({ 
       zApiUrl: { $exists: true, $ne: '' }
     }).sort({ createdAt: -1 });
@@ -396,7 +439,6 @@ app.post('/api/test-zapi', async (req, res) => {
     console.log('✅ Conta encontrada:', account.name);
     console.log('📋 URL:', account.zApiUrl);
     
-    // Testa extração
     const instanceMatch = account.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
     
     if (!instanceMatch) {
@@ -416,7 +458,6 @@ app.post('/api/test-zapi', async (req, res) => {
     console.log('🔐 Token:', token.substring(0, 10) + '...');
     console.log('🌐 Send URL:', sendUrl);
     
-    // Testa envio
     const response = await fetch(sendUrl, {
       method: 'POST',
       headers: {
@@ -453,7 +494,7 @@ app.post('/api/test-zapi', async (req, res) => {
 });
 
 // ============================================
-// SEND MESSAGE VIA Z-API - CORRIGIDO! 🎯
+// SEND MESSAGE VIA Z-API
 // ============================================
 app.post('/api/send-message', async (req, res) => {
   try {
@@ -467,7 +508,6 @@ app.post('/api/send-message', async (req, res) => {
     console.log('📤 Tentando enviar mensagem para:', phone);
     console.log('💬 Mensagem:', message);
     
-    // Busca conta Z-API mais recente com URL configurada
     const connectedAccount = await Account.findOne({
       zApiUrl: { $exists: true, $ne: '' }
     }).sort({ createdAt: -1 });
@@ -481,14 +521,11 @@ app.post('/api/send-message', async (req, res) => {
         console.log('✅ Conta encontrada:', connectedAccount.name);
         console.log('📋 URL original:', connectedAccount.zApiUrl);
         
-        // EXTRAÇÃO CORRIGIDA COM VALIDAÇÃO ROBUSTA
         const urlPattern = /instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i;
         const urlMatch = connectedAccount.zApiUrl.match(urlPattern);
         
         if (!urlMatch || urlMatch.length < 3) {
           console.error('❌ ERRO: URL Z-API inválida!');
-          console.error('   Formato esperado: https://api.z-api.io/instances/INSTANCE_ID/token/TOKEN');
-          console.error('   URL recebida:', connectedAccount.zApiUrl);
           throw new Error('URL Z-API mal formatada');
         }
         
@@ -498,11 +535,9 @@ app.post('/api/send-message', async (req, res) => {
         console.log('🔑 Instance ID extraído:', instanceId);
         console.log('🔐 Token extraído:', token.substring(0, 10) + '...');
         
-        // Monta URL de envio corretamente
         const sendUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
         console.log('🌐 URL de envio:', sendUrl);
         
-        // Prepara headers
         const headers = {
           'Content-Type': 'application/json'
         };
@@ -512,11 +547,9 @@ app.post('/api/send-message', async (req, res) => {
           console.log('🔐 Client-Token adicionado aos headers');
         }
         
-        // Limpa telefone (remove caracteres não numéricos)
         const cleanPhone = phone.replace(/\D/g, '');
         console.log('📞 Telefone limpo:', cleanPhone);
         
-        // Payload para Z-API
         const payload = {
           phone: cleanPhone,
           message: message
@@ -525,7 +558,6 @@ app.post('/api/send-message', async (req, res) => {
         console.log('📦 Payload:', JSON.stringify(payload));
         console.log('📡 Enviando requisição para Z-API...');
         
-        // ENVIA VIA Z-API
         const zapiResponse = await fetch(sendUrl, {
           method: 'POST',
           headers: headers,
@@ -548,13 +580,11 @@ app.post('/api/send-message', async (req, res) => {
         
       } catch (zapiError) {
         console.error('⚠️ Erro ao comunicar com Z-API:', zapiError.message);
-        console.error('⚠️ Stack:', zapiError.stack);
       }
     } else {
       console.warn('⚠️ Nenhuma conta Z-API configurada no banco');
     }
     
-    // Salva mensagem no MongoDB (sempre salva)
     const newMessage = new Message({
       messageId: messageId,
       phone: phone.replace(/\D/g, ''),
@@ -574,7 +604,6 @@ app.post('/api/send-message', async (req, res) => {
     await newMessage.save();
     console.log('💾 Mensagem salva no MongoDB');
     
-    // Atualiza chat
     await Chat.findOneAndUpdate(
       { phone: phone.replace(/\D/g, '') },
       {
@@ -596,14 +625,12 @@ app.post('/api/send-message', async (req, res) => {
       zapiResponse: zapiData
     };
     
-    console.log(sentViaZapi ? '✅ Mensagem enviada via Z-API e salva no banco' : '⚠️ Mensagem salva apenas no banco (Z-API falhou)');
     console.log('📤 Resposta final:', JSON.stringify(response, null, 2));
     
     res.json(response);
     
   } catch (error) {
     console.error('❌ ERRO CRÍTICO:', error.message);
-    console.error('❌ Stack:', error.stack);
     res.status(500).json({ 
       success: false,
       error: error.message,
@@ -677,7 +704,7 @@ app.post('/webhook', async (req, res) => {
         { upsert: true, new: true }
       );
       
-      console.log('✅ Mensagem salva:', normalizedPhone, '-', messageText, '- Nome:', contactName);
+      console.log('✅ Mensagem salva:', normalizedPhone, '-', messageText);
     } else {
       console.log('⚠️ Webhook sem phone ou text válido');
     }
@@ -778,5 +805,4 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-// Para Vercel (serverless)
 module.exports = app;
