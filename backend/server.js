@@ -360,7 +360,7 @@ app.put('/api/campaigns/:id', async (req, res) => {
 });
 
 // ============================================
-// SEND MESSAGE VIA Z-API (EXTRAI DA URL)
+// SEND MESSAGE VIA Z-API (CORRIGIDO - SEM FILTRO DE STATUS)
 // ============================================
 app.post('/api/send-message', async (req, res) => {
   try {
@@ -373,10 +373,10 @@ app.post('/api/send-message', async (req, res) => {
 
     console.log('📤 Enviando mensagem:', message, 'para:', phone);
 
-    // ✅ BUSCA CONTA Z-API CONECTADA NO BANCO
+    // ✅ BUSCA ÚLTIMA CONTA COM Z-API URL (INDEPENDENTE DO STATUS)
     const connectedAccount = await Account.findOne({ 
-  zApiUrl: { $exists: true, $ne: '' }
-}).sort({ createdAt: -1 });
+      zApiUrl: { $exists: true, $ne: '' }
+    }).sort({ createdAt: -1 });
 
     let zapiData = null;
     let messageId = `msg_${Date.now()}`;
@@ -409,6 +409,8 @@ app.post('/api/send-message', async (req, res) => {
           headers['Client-Token'] = connectedAccount.zApiClientToken;
         }
 
+        console.log('📡 Enviando para:', sendUrl);
+
         const zapiResponse = await fetch(sendUrl, {
           method: 'POST',
           headers: headers,
@@ -421,8 +423,8 @@ app.post('/api/send-message', async (req, res) => {
         zapiData = await zapiResponse.json();
         console.log('📨 Resposta Z-API:', JSON.stringify(zapiData));
 
-        if (zapiData && zapiData.messageId) {
-          messageId = zapiData.messageId;
+        if (zapiData && (zapiData.messageId || zapiData.success)) {
+          messageId = zapiData.messageId || `msg_${Date.now()}`;
           sentViaZapi = true;
         }
 
@@ -434,7 +436,7 @@ app.post('/api/send-message', async (req, res) => {
         console.error('⚠️ Erro ao enviar via Z-API:', zapiError.message);
       }
     } else {
-      console.warn('⚠️ Nenhuma conta Z-API conectada encontrada');
+      console.warn('⚠️ Nenhuma conta Z-API encontrada no banco');
     }
 
     // ✅ Salva no banco (sempre salva, independente do Z-API)
@@ -596,12 +598,15 @@ app.get('/health', async (req, res) => {
   try {
     await connectDB();
     const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
-    const connectedAccount = await Account.findOne({ status: 'CONNECTED' });
+    const connectedAccount = await Account.findOne({ 
+      zApiUrl: { $exists: true, $ne: '' }
+    }).sort({ createdAt: -1 });
     
     res.json({
       status: 'OK',
       mongodb: dbStatus,
       zapiAccount: connectedAccount ? connectedAccount.name : 'Nenhuma conectada',
+      zapiUrl: connectedAccount ? connectedAccount.zApiUrl : null,
       timestamp: new Date().toISOString(),
       uptime: process.uptime()
     });
