@@ -1,298 +1,298 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Paperclip, Search, User, Loader2, RefreshCw, Clock } from 'lucide-react';
-import { apiService } from '../services/api';
-import { Account, ChatSession, ChatMessage } from '../types';
+import { Send, Search, User, Loader2, RefreshCw } from 'lucide-react';
 
-const STORAGE_KEY_ACCOUNTS = 'zapmaster_accounts';
+interface ChatItem {
+  phone: string;
+  contactName: string;
+  lastMessage: string;
+  unreadCount: number;
+  lastMessageAt: Date;
+}
+
+interface Message {
+  _id: string;
+  phone: string;
+  text: string;
+  sender: 'user' | 'agent' | 'system';
+  fromMe: boolean;
+  timestamp: Date;
+}
+
+const API_URL = import.meta.env.VITE_API_URL || 'https://zapmaster-backend.vercel.app';
 
 const Chat: React.FC = () => {
-  const [activeAccount, setActiveAccount] = useState<Account | null>(null);
-  const [chats, setChats] = useState<ChatSession[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  
-  // Estado Dividido: Histórico Real + Fila de Envio
-  const [serverMessages, setServerMessages] = useState<ChatMessage[]>([]);
-  const [pendingMessages, setPendingMessages] = useState<ChatMessage[]>([]);
-  
+  const [chats, setChats] = useState<ChatItem[]>([]);
+  const [activePhone, setActivePhone] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
-  
   const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-
+  const [searchTerm, setSearchTerm] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Carrega conta inicial
+  // Carrega chats do backend
+  const loadChats = async (silent = false) => {
+    try {
+      if (!silent) setIsLoadingChats(true);
+      const response = await fetch(`${API_URL}/api/chats`);
+      const data = await response.json();
+      console.log('📋 Chats carregados do webhook:', data.length);
+      setChats(data);
+      if (!silent) setIsLoadingChats(false);
+    } catch (error) {
+      console.error('❌ Erro ao carregar chats:', error);
+      if (!silent) setIsLoadingChats(false);
+    }
+  };
+
+  // Carrega mensagens de um chat específico
+  const loadMessages = async (phone: string, silent = false) => {
+    try {
+      if (!silent) setIsLoadingMessages(true);
+      const response = await fetch(`${API_URL}/api/messages/${phone}`);
+      const data = await response.json();
+      console.log('💬 Mensagens carregadas:', data.length);
+      setMessages(data.reverse()); // Inverte para ordem cronológica
+      if (!silent) setIsLoadingMessages(false);
+    } catch (error) {
+      console.error('❌ Erro ao carregar mensagens:', error);
+      if (!silent) setIsLoadingMessages(false);
+    }
+  };
+
+  // Carrega chats inicial
   useEffect(() => {
-      const savedAccounts = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
-      if (savedAccounts) {
-          const parsed: Account[] = JSON.parse(savedAccounts);
-          const connected = parsed.find(a => a.status === 'CONNECTED');
-          if (connected) {
-              setActiveAccount(connected);
-              loadChats(connected);
-          }
-      }
+    loadChats();
   }, []);
 
-  // Polling - Busca novas mensagens automaticamente
+  // Polling - atualiza chats e mensagens automaticamente
   useEffect(() => {
-      if (!activeAccount) return;
-      
-      console.log('🔄 Polling iniciado para conta:', activeAccount.name);
-      
-      const interval = setInterval(() => {
-          // Atualiza lista de chats silenciosamente
-          loadChats(activeAccount, true);
-          // Se tiver chat aberto, atualiza mensagens
-          if (activeChatId) {
-              console.log('📥 Buscando novas mensagens para:', activeChatId);
-              loadMessages(activeAccount, activeChatId, true);
-          }
-      }, 3000); // 3 segundos - mais rápido
-      
-      return () => {
-          console.log('⏹️ Polling parado');
-          clearInterval(interval);
-      };
-  }, [activeAccount, activeChatId]);
+    const interval = setInterval(() => {
+      loadChats(true); // Atualiza lista silenciosamente
+      if (activePhone) {
+        loadMessages(activePhone, true); // Atualiza mensagens silenciosamente
+      }
+    }, 3000); // A cada 3 segundos
 
-  // Scroll to bottom
+    return () => clearInterval(interval);
+  }, [activePhone]);
+
+  // Scroll automático para última mensagem
   useEffect(() => {
-      // Pequeno delay para garantir renderização antes do scroll
-      setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
-  }, [serverMessages.length, pendingMessages.length, activeChatId]);
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  }, [messages]);
 
-  const loadChats = async (account: Account, silent = false) => {
-      if (!silent) setIsLoadingChats(true);
-      const data = await apiService.getChats(account);
-      console.log('📋 Chats carregados:', data.length);
-      
-      // ✅ FILTRO DE SEGURANÇA: Remove chats sem ID válido
-      const validChats = data.filter(chat => chat.id && typeof chat.id === 'string');
-      setChats(validChats);
-      
-      if (!silent) setIsLoadingChats(false);
+  // Seleciona um chat
+  const handleChatSelect = (phone: string) => {
+    setActivePhone(phone);
+    setMessages([]);
+    loadMessages(phone);
   };
 
-  const loadMessages = async (account: Account, chatId: string, silent = false) => {
-      if (!silent) setIsLoadingMessages(true);
-      const history = await apiService.getChatMessages(account, chatId);
-      console.log('💬 Mensagens carregadas:', history.length, 'para chat:', chatId);
-      
-      // Atualiza mensagens do servidor
-      setServerMessages(history);
-
-      // LIMPEZA DA FILA PENDENTE:
-      // Se a mensagem pendente já apareceu no histórico (match por texto e timestamp próximo), remove da pendência.
-      setPendingMessages(currentPending => {
-          return currentPending.filter(pending => {
-              const isSynced = history.some(serverMsg => 
-                  // Match por ID explícito
-                  serverMsg.id === pending.id || 
-                  // OU Match heurístico: mesmo texto, enviado por 'agent', e tempo próximo (< 2 min de diferença)
-                  (
-                      serverMsg.text === pending.text && 
-                      serverMsg.sender === 'agent' && 
-                      Math.abs(new Date(serverMsg.timestamp).getTime() - new Date(pending.timestamp).getTime()) < 120000
-                  )
-              );
-              return !isSynced; // Mantém apenas se NÃO estiver sincronizado ainda
-          });
-      });
-
-      if (!silent) setIsLoadingMessages(false);
-  };
-
-  const handleChatSelect = (chatId: string) => {
-      // ✅ VALIDAÇÃO: Só abre se chatId for válido
-      if (!chatId || typeof chatId !== 'string') {
-          console.error('❌ ChatId inválido:', chatId);
-          return;
-      }
-      
-      setActiveChatId(chatId);
-      setPendingMessages([]); // Limpa pendentes visuais ao trocar de chat
-      setServerMessages([]); // Limpa histórico anterior
-      if (activeAccount) {
-          loadMessages(activeAccount, chatId);
-      }
-  };
-
+  // Envia mensagem (simulado - precisa configurar Z-API)
   const handleSend = async () => {
-    if (!inputValue.trim() || !activeAccount || !activeChatId) return;
-    
-    // Cria mensagem temporária
-    const tempId = 'temp-' + Date.now();
-    const tempMsg: ChatMessage = { 
-        id: tempId, 
-        text: inputValue, 
-        sender: 'agent', 
-        timestamp: new Date() 
+    if (!inputValue.trim() || !activePhone) return;
+
+    const tempMessage: Message = {
+      _id: 'temp-' + Date.now(),
+      phone: activePhone,
+      text: inputValue,
+      sender: 'agent',
+      fromMe: true,
+      timestamp: new Date()
     };
-    
-    // 1. Adiciona na fila visual imediatamente
-    setPendingMessages(prev => [...prev, tempMsg]);
-    const msgToSend = inputValue;
-    setInputValue(''); 
 
-    // 2. Envia para API
-    const result = await apiService.sendMessage(activeAccount, activeChatId, msgToSend);
-    
-    // 3. Se a API retornou o ID real, atualiza a mensagem pendente com o ID real
-    if (result.success && result.messageId) {
-        setPendingMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: result.messageId! } : m));
+    setMessages(prev => [...prev, tempMessage]);
+    const messageText = inputValue;
+    setInputValue('');
+
+    try {
+      // TODO: Integrar com Z-API para envio real
+      console.log('📤 Enviando via Z-API:', messageText, 'para:', activePhone);
+      
+      // Simula envio bem-sucedido
+      setTimeout(() => {
+        loadMessages(activePhone, true);
+      }, 1000);
+    } catch (error) {
+      console.error('❌ Erro ao enviar:', error);
     }
-
-    // 4. Força refresh do histórico após 1s para tentar pegar a mensagem oficial
-    setTimeout(() => loadMessages(activeAccount, activeChatId, true), 1000);
   };
 
-  const activeChatData = chats.find(c => c.id === activeChatId);
-  const displayMessages = [...serverMessages, ...pendingMessages].sort((a, b) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  // Filtra chats pela busca
+  const filteredChats = chats.filter(chat =>
+    chat.contactName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    chat.phone.includes(searchTerm)
   );
 
-  if (!activeAccount) {
-      return (
-          <div className="flex h-[calc(100vh-2rem)] bg-card border border-gray-700 rounded-2xl items-center justify-center text-gray-400">
-              <p>Nenhuma conta WhatsApp conectada. Vá em Conexões.</p>
-          </div>
-      );
-  }
+  const activeChatData = chats.find(c => c.phone === activePhone);
 
   return (
-    <div className="flex h-[calc(100vh-2rem)] bg-card border border-gray-700 rounded-2xl overflow-hidden">
-      {/* Sidebar List */}
-      <div className="w-80 border-r border-gray-700 flex flex-col">
-        <div className="p-4 border-b border-gray-700 bg-gray-800/50">
-            <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
-                <input 
-                    type="text" 
-                    placeholder="Buscar conversa..." 
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2 pl-10 pr-4 text-sm text-gray-300 focus:outline-none focus:border-primary"
-                />
-            </div>
+    <div className="flex h-screen bg-[#0a0e27]">
+      {/* Sidebar - Lista de Chats */}
+      <div className="w-96 bg-[#111827] border-r border-gray-800 flex flex-col">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-800">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-white">Conversas</h2>
+            <button
+              onClick={() => loadChats()}
+              className="text-gray-400 hover:text-white transition-colors"
+              title="Atualizar"
+            >
+              <RefreshCw className="w-5 h-5" />
+            </button>
+          </div>
+          
+          {/* Busca */}
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar contato..."
+              className="w-full pl-10 pr-4 py-2 bg-[#1f2937] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
         </div>
-        
+
+        {/* Lista de Chats */}
         <div className="flex-1 overflow-y-auto">
-            {isLoadingChats && chats.length === 0 ? (
-                <div className="flex justify-center py-10"><Loader2 className="animate-spin text-primary"/></div>
-            ) : (
-                chats.map(chat => {
-                    // ✅ VALIDAÇÃO EXTRA: Garante que chat.id existe antes de renderizar
-                    if (!chat.id || typeof chat.id !== 'string') {
-                        console.warn('⚠️ Chat sem ID válido, pulando renderização:', chat);
-                        return null;
-                    }
-                    
-                    return (
-                        <div 
-                            key={chat.id} 
-                            onClick={() => handleChatSelect(chat.id)}
-                            className={`p-4 flex items-center space-x-3 cursor-pointer hover:bg-gray-800 transition-colors border-b border-gray-800 ${activeChatId === chat.id ? 'bg-gray-800 border-l-4 border-l-primary' : ''}`}
-                        >
-                            <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center text-gray-400 shrink-0">
-                                <User size={20} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-center">
-                                    <h4 className="text-white font-medium truncate text-sm">{chat.contactName || 'Desconhecido'}</h4>
-                                </div>
-                                <p className="text-xs text-gray-500 truncate mt-1">
-                                    {/* ✅ CORREÇÃO PRINCIPAL: Usa optional chaining e fallback */}
-                                    {chat.id?.replace(/\D/g, '') || 'Sem número'}
-                                </p>
-                            </div>
-                            {chat.unreadCount > 0 && (
-                                <div className="w-5 h-5 bg-primary rounded-full flex items-center justify-center text-[10px] text-white font-bold">
-                                    {chat.unreadCount}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })
-            )}
+          {isLoadingChats && chats.length === 0 ? (
+            <div className="flex items-center justify-center h-64">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+            </div>
+          ) : filteredChats.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-gray-500">
+              <User className="w-12 h-12 mb-2" />
+              <p>Nenhuma conversa ainda</p>
+              <p className="text-sm">Aguardando mensagens via webhook</p>
+            </div>
+          ) : (
+            filteredChats.map(chat => (
+              <div
+                key={chat.phone}
+                onClick={() => handleChatSelect(chat.phone)}
+                className={`p-4 flex items-start space-x-3 cursor-pointer hover:bg-gray-800 transition-colors border-b border-gray-800 ${
+                  activePhone === chat.phone ? 'bg-gray-800 border-l-4 border-l-blue-500' : ''
+                }`}
+              >
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+                  <User className="w-6 h-6 text-white" />
+                </div>
+                
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="font-semibold text-white truncate">
+                      {chat.contactName || chat.phone}
+                    </h3>
+                    {chat.unreadCount > 0 && (
+                      <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-1 rounded-full flex-shrink-0">
+                        {chat.unreadCount}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-400 truncate">{chat.phone}</p>
+                  <p className="text-sm text-gray-500 truncate">{chat.lastMessage}</p>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
-      {/* Chat Area */}
-      <div className="flex-1 flex flex-col bg-[#0b141a]">
-         {activeChatId && activeChatData ? (
-             <>
-                {/* Header */}
-                <div className="h-16 bg-[#202c33] border-b border-gray-700 px-4 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center text-gray-300">
-                            <User size={20} />
-                        </div>
-                        <div>
-                            <h3 className="text-white font-medium">{activeChatData.contactName || 'Desconhecido'}</h3>
-                            <span className="text-xs text-gray-400">{activeChatData.id || 'ID não disponível'}</span>
-                        </div>
-                    </div>
-                    <button onClick={() => loadMessages(activeAccount, activeChatId)} className="text-gray-400 hover:text-white" title="Atualizar">
-                        <RefreshCw size={20} className={isLoadingMessages ? "animate-spin" : ""} />
-                    </button>
+      {/* Área de Chat */}
+      <div className="flex-1 flex flex-col">
+        {activePhone && activeChatData ? (
+          <>
+            {/* Header do Chat */}
+            <div className="bg-[#1f2937] p-4 border-b border-gray-800 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                  <User className="w-6 h-6 text-white" />
                 </div>
-
-                {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-4" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', opacity: 0.95 }}>
-                    {isLoadingMessages && serverMessages.length === 0 && pendingMessages.length === 0 ? (
-                        <div className="flex justify-center mt-10"><Loader2 className="animate-spin text-white"/></div>
-                    ) : (
-                        displayMessages.map((msg) => {
-                            const isPending = String(msg.id).startsWith('temp-');
-                            return (
-                                <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`max-w-[70%] rounded-lg px-4 py-2 shadow-md ${msg.sender === 'agent' ? 'bg-[#005c4b] text-white rounded-tr-none' : 'bg-[#202c33] text-white rounded-tl-none'}`}>
-                                        <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-                                        <div className="flex justify-end items-center mt-1 space-x-1">
-                                            <span className="text-[10px] text-gray-400">
-                                                {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                            </span>
-                                            {isPending && <Clock size={10} className="text-gray-400 animate-pulse" />}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })
-                    )}
-                    <div ref={messagesEndRef} className="h-2" />
+                <div>
+                  <h3 className="font-semibold text-white">
+                    {activeChatData.contactName || 'Desconhecido'}
+                  </h3>
+                  <p className="text-sm text-gray-400">{activePhone}</p>
                 </div>
+              </div>
+              
+              <button
+                onClick={() => loadMessages(activePhone)}
+                className="text-gray-400 hover:text-white transition-colors"
+                title="Atualizar mensagens"
+              >
+                <RefreshCw className="w-5 h-5" />
+              </button>
+            </div>
 
-                {/* Input */}
-                <div className="bg-[#202c33] p-4 flex items-center space-x-3">
-                    <button className="text-gray-400 hover:text-gray-300">
-                        <Paperclip size={22} />
-                    </button>
-                    <input 
-                        type="text" 
-                        value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                        placeholder="Digite uma mensagem..." 
-                        className="flex-1 bg-[#2a3942] rounded-lg py-2 px-4 text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-600"
-                    />
-                    <button 
-                        onClick={handleSend}
-                        className="p-2 bg-primary hover:bg-emerald-600 rounded-full text-white transition-colors"
+            {/* Mensagens */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#0a0e27]">
+              {isLoadingMessages && messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                </div>
+              ) : (
+                messages.map((msg) => (
+                  <div
+                    key={msg._id}
+                    className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                        msg.fromMe
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-[#1f2937] text-white'
+                      }`}
                     >
-                        <Send size={20} />
-                    </button>
-                </div>
-             </>
-         ) : (
-             <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-[#222e35]">
-                 <div className="w-32 h-32 bg-gray-700/30 rounded-full flex items-center justify-center mb-4">
-                    <User size={64} className="opacity-50" />
-                 </div>
-                 <h3 className="text-xl font-medium text-gray-400">ZapMaster Web</h3>
-                 <p className="text-sm mt-2 max-w-md text-center">Selecione uma conversa à esquerda para iniciar o atendimento.</p>
-             </div>
-         )}
+                      <p className="break-words">{msg.text}</p>
+                      <span className="text-xs opacity-70 mt-1 block">
+                        {new Date(msg.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input de Mensagem */}
+            <div className="bg-[#1f2937] p-4 border-t border-gray-800">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                  placeholder="Digite uma mensagem..."
+                  className="flex-1 bg-[#0a0e27] rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white p-3 rounded-lg transition-colors"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
+            <User className="w-20 h-20 mb-4 opacity-50" />
+            <h2 className="text-2xl font-bold mb-2">ZapMaster Web</h2>
+            <p>Selecione uma conversa à esquerda para iniciar o atendimento.</p>
+            <p className="text-sm mt-2">Aguardando mensagens via Z-API webhook</p>
+          </div>
+        )}
       </div>
     </div>
   );
