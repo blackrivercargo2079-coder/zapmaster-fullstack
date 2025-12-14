@@ -365,6 +365,94 @@ app.put('/api/campaigns/:id', async (req, res) => {
 });
 
 // ============================================
+// ROTA DE DEBUG - TESTE Z-API 🔍
+// ============================================
+app.post('/api/test-zapi', async (req, res) => {
+  try {
+    await connectDB();
+    
+    const { phone, message } = req.body;
+    
+    console.log('🔍 DEBUG - Buscando conta...');
+    
+    // Busca conta
+    const account = await Account.findOne({ 
+      zApiUrl: { $exists: true, $ne: '' }
+    }).sort({ createdAt: -1 });
+    
+    const totalAccounts = await Account.countDocuments();
+    
+    console.log(`📊 Total de contas no banco: ${totalAccounts}`);
+    
+    if (!account) {
+      console.log('❌ Nenhuma conta encontrada com zApiUrl');
+      return res.json({ 
+        error: 'Nenhuma conta encontrada',
+        totalAccounts: totalAccounts,
+        debug: 'Nenhuma conta tem zApiUrl configurado'
+      });
+    }
+    
+    console.log('✅ Conta encontrada:', account.name);
+    console.log('📋 URL:', account.zApiUrl);
+    
+    // Testa extração
+    const instanceMatch = account.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
+    
+    if (!instanceMatch) {
+      console.log('❌ URL mal formatada');
+      return res.json({
+        error: 'URL inválida - regex não deu match',
+        accountName: account.name,
+        url: account.zApiUrl,
+        totalAccounts
+      });
+    }
+    
+    const [, instanceId, token] = instanceMatch;
+    const sendUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
+    
+    console.log('🔑 Instance:', instanceId);
+    console.log('🔐 Token:', token.substring(0, 10) + '...');
+    console.log('🌐 Send URL:', sendUrl);
+    
+    // Testa envio
+    const response = await fetch(sendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Client-Token': account.zApiClientToken || ''
+      },
+      body: JSON.stringify({
+        phone: phone.replace(/\D/g, ''),
+        message: message || 'Teste debug'
+      })
+    });
+    
+    const data = await response.json();
+    
+    console.log('📨 Status HTTP:', response.status);
+    console.log('📨 Resposta Z-API:', data);
+    
+    res.json({
+      success: true,
+      accountFound: account.name,
+      totalAccounts,
+      instanceId,
+      token: token.substring(0, 10) + '...',
+      sendUrl,
+      zapiStatus: response.status,
+      zapiResponse: data,
+      sentSuccess: response.ok && data.messageId ? true : false
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no debug:', error);
+    res.json({ error: error.message, stack: error.stack });
+  }
+});
+
+// ============================================
 // SEND MESSAGE VIA Z-API - CORRIGIDO! 🎯
 // ============================================
 app.post('/api/send-message', async (req, res) => {
@@ -668,6 +756,7 @@ app.get('/', (req, res) => {
       chats: '/api/chats',
       messages: '/api/messages/:phone',
       sendMessage: '/api/send-message',
+      testZapi: '/api/test-zapi',
       campaigns: '/api/campaigns',
       webhook: '/webhook',
       health: '/health',
