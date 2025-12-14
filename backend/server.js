@@ -755,6 +755,105 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ============================================
+// ROUTE - SEND MESSAGE (Z-API)
+// ============================================
+app.post('/api/send-message', async (req, res) => {
+  try {
+    const { phone, message, image } = req.body;
+    
+    // Validação básica
+    if (!phone) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Phone é obrigatório' 
+      });
+    }
+    
+    // Precisa ter pelo menos mensagem OU imagem
+    if (!message && !image) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Message ou image são obrigatórios' 
+      });
+    }
+    
+    // Buscar conta ativa (Z-API configurada)
+    const activeAccount = await Account.findOne({ 
+      status: 'CONNECTED',
+      zApiUrl: { $exists: true, $ne: null }
+    });
+    
+    if (!activeAccount || !activeAccount.zApiUrl) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Nenhuma conta Z-API conectada' 
+      });
+    }
+    
+    const cleanPhone = phone.replace(/\D/g, '');
+    
+    // Decidir endpoint baseado no tipo de envio
+    let endpoint = `${activeAccount.zApiUrl}/send-text`;
+    const body = { phone: cleanPhone };
+    
+    // Se tem imagem, usa send-image
+    if (image) {
+      endpoint = `${activeAccount.zApiUrl}/send-image`;
+      body.image = image;
+      if (message) {
+        body.caption = message; // Legenda da imagem
+      }
+    } else {
+      // Só texto
+      body.message = message;
+    }
+    
+    const headers = { 'Content-Type': 'application/json' };
+    if (activeAccount.zApiClientToken) {
+      headers['Client-Token'] = activeAccount.zApiClientToken;
+    }
+    
+    console.log('📤 Enviando via Z-API:', {
+      endpoint,
+      phone: cleanPhone,
+      hasMessage: !!message,
+      hasImage: !!image
+    });
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+    
+    const resData = await response.json();
+    
+    if (response.ok) {
+      const msgId = resData.messageId || resData.id || resData.zaapId;
+      console.log('✅ Mensagem enviada:', msgId);
+      
+      return res.json({
+        success: true,
+        messageId: msgId
+      });
+    }
+    
+    console.error('❌ Erro Z-API:', resData);
+    return res.status(500).json({
+      success: false,
+      error: resData.message || resData.error || 'Erro ao enviar'
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro ao enviar mensagem:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// ============================================
 // STATS
 // ============================================
 app.get('/api/stats', async (req, res) => {
