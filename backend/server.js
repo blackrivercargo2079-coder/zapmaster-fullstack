@@ -792,13 +792,23 @@ app.post('/api/send-message', async (req, res) => {
     
     const cleanPhone = phone.replace(/\D/g, '');
     
+    // ✅ LIMPAR URL DA Z-API (remover /token/xxx se presente)
+    let baseUrl = activeAccount.zApiUrl;
+    if (baseUrl.includes('/token/')) {
+      baseUrl = baseUrl.substring(0, baseUrl.indexOf('/token/'));
+    }
+    // Remover barra final se houver
+    if (baseUrl.endsWith('/')) {
+      baseUrl = baseUrl.slice(0, -1);
+    }
+    
     // Decidir endpoint baseado no tipo de envio
-    let endpoint = `${activeAccount.zApiUrl}/send-text`;
+    let endpoint = `${baseUrl}/send-text`;
     const body = { phone: cleanPhone };
     
     // Se tem imagem, usa send-image
     if (image) {
-      endpoint = `${activeAccount.zApiUrl}/send-image`;
+      endpoint = `${baseUrl}/send-image`;
       body.image = image;
       if (message) {
         body.caption = message; // Legenda da imagem
