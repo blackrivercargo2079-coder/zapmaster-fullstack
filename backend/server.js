@@ -1,994 +1,960 @@
-import React, { useState, useEffect } from 'react';
-import { Wand2, Image as ImageIcon, X, Play, Clock, ShieldCheck, Link, Users, Loader2, CheckCircle2, AlertTriangle, Monitor, Smartphone, ShieldBan, Pause, Activity } from 'lucide-react';
-import { generateCampaignContent } from '../services/geminiService';
-import { apiService } from '../services/api';
-import { Contact, Account, ContactStatus } from '../types';
-import { campaignControl, CampaignSettings, CampaignStats, ACCOUNT_AGE_INFO } from '../services/campaignControl';
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+require('dotenv').config();
 
-const STORAGE_KEY_CONTACTS = 'zapmaster_contacts';
-const STORAGE_KEY_ACCOUNTS = 'zapmaster_accounts';
+const app = express();
+const PORT = process.env.PORT || 3002;
 
-const Campaigns: React.FC = () => {
-  const [banners, setBanners] = useState<string[]>([]);
-  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
-  const [message, setMessage] = useState('');
-  const [unsubscribe, setUnsubscribe] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  // Segmentation
-  const [availableSegments, setAvailableSegments] = useState<string[]>([]);
-  const [selectedSegment, setSelectedSegment] = useState<string>('');
-  const [contactsCount, setContactsCount] = useState(0);
-  const [blockedCount, setBlockedCount] = useState(0);
-
-  // Campaign Status
-  const [campaignStatus, setCampaignStatus] = useState<'IDLE' | 'SENDING' | 'PAUSED' | 'COMPLETED'>('IDLE');
-  const [progress, setProgress] = useState({ sent: 0, failed: 0, total: 0 });
-  const [currentContactName, setCurrentContactName] = useState('');
-  const [delayMode, setDelayMode] = useState<'SLOW' | 'MEDIUM' | 'FAST'>('MEDIUM');
-
-  // Sistema de Controle e Limites
-  const [settings, setSettings] = useState<CampaignSettings>(campaignControl.loadSettings());
-  const [stats, setStats] = useState<CampaignStats>(campaignControl.loadDailyStats());
-  const [messagesSinceLastPause, setMessagesSinceLastPause] = useState(0);
-  const [isPausing, setIsPausing] = useState(false);
-  const [pauseTimeRemaining, setPauseTimeRemaining] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
-
-  // Error state for campaign interruption
-  const [criticalError, setCriticalError] = useState<string | null>(null);
-
-  // Form states
-  const [productName, setProductName] = useState('');
-  const [audience, setAudience] = useState('');
-  const [ctaText, setCtaText] = useState('');
-  const [ctaLink, setCtaLink] = useState('');
-
-  // Image Upload Loading State
-  const [isProcessingImage, setIsProcessingImage] = useState(false);
-
-  // ✅ CORRIGIDO: Buscar segmentos (tags) do MongoDB via API
-  useEffect(() => {
-    const fetchContacts = async () => {
-      try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
-        const response = await fetch(`${apiUrl}/api/contacts`);
-        
-        if (response.ok) {
-          const contacts: Contact[] = await response.json();
-          
-          // Extrair tags únicas
-          const tags = new Set<string>();
-          contacts.forEach(c => {
-            if (c.tags && Array.isArray(c.tags)) {
-              c.tags.forEach(t => {
-                if (t && typeof t === 'string' && t.trim().length > 0) {
-                  tags.add(t);
-                }
-              });
-            }
-          });
-          
-          const tagArray = Array.from(tags);
-          setAvailableSegments(tagArray);
-          
-          if (tagArray.length > 0) {
-            setSelectedSegment(tagArray[0]);
-          }
-        } else {
-          // Fallback para localStorage se API falhar
-          console.log('API falhou, usando localStorage como fallback');
-          const saved = localStorage.getItem(STORAGE_KEY_CONTACTS);
-          if (saved) {
-            const contacts: Contact[] = JSON.parse(saved);
-            const tags = new Set<string>();
-            contacts.forEach(c => {
-              if (c.tags) c.tags.forEach(t => tags.add(t));
-            });
-            const tagArray = Array.from(tags);
-            setAvailableSegments(tagArray);
-            if (tagArray.length > 0) setSelectedSegment(tagArray[0]);
-          }
-        }
-      } catch (error) {
-        console.error('Erro ao buscar contatos do MongoDB:', error);
-        
-        // Fallback para localStorage
-        const saved = localStorage.getItem(STORAGE_KEY_CONTACTS);
-        if (saved) {
-          const contacts: Contact[] = JSON.parse(saved);
-          const tags = new Set<string>();
-          contacts.forEach(c => {
-            if (c.tags) c.tags.forEach(t => tags.add(t));
-          });
-          const tagArray = Array.from(tags);
-          setAvailableSegments(tagArray);
-          if (tagArray.length > 0) setSelectedSegment(tagArray[0]);
-        }
-      }
-    };
-
-    fetchContacts();
-  }, []);
-
-  // ✅ CORRIGIDO: Contar contatos ativos e bloqueados do segmento selecionado
-  useEffect(() => {
-    const fetchSegmentCounts = async () => {
-      if (!selectedSegment) return;
-
-      try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
-        const response = await fetch(`${apiUrl}/api/contacts`);
-        
-        if (response.ok) {
-          const contacts: Contact[] = await response.json();
-          
-          // Filtrar por tag selecionada
-          const segmentContacts = contacts.filter(c => 
-            c.tags && c.tags.includes(selectedSegment)
-          );
-          
-          const active = segmentContacts.filter(c => 
-            c.status !== ContactStatus.BLOCKED
-          ).length;
-          
-          const blocked = segmentContacts.filter(c => 
-            c.status === ContactStatus.BLOCKED
-          ).length;
-          
-          setContactsCount(active);
-          setBlockedCount(blocked);
-        } else {
-          // Fallback localStorage
-          const saved = localStorage.getItem(STORAGE_KEY_CONTACTS);
-          if (saved) {
-            const contacts: Contact[] = JSON.parse(saved);
-            const segmentContacts = contacts.filter(c => c.tags?.includes(selectedSegment));
-            const active = segmentContacts.filter(c => c.status !== ContactStatus.BLOCKED).length;
-            const blocked = segmentContacts.filter(c => c.status === ContactStatus.BLOCKED).length;
-            setContactsCount(active);
-            setBlockedCount(blocked);
-          }
-        }
-      } catch (error) {
-        console.error('Erro ao buscar contatos:', error);
-        
-        // Fallback localStorage
-        const saved = localStorage.getItem(STORAGE_KEY_CONTACTS);
-        if (saved) {
-          const contacts: Contact[] = JSON.parse(saved);
-          const segmentContacts = contacts.filter(c => c.tags?.includes(selectedSegment));
-          const active = segmentContacts.filter(c => c.status !== ContactStatus.BLOCKED).length;
-          const blocked = segmentContacts.filter(c => c.status === ContactStatus.BLOCKED).length;
-          setContactsCount(active);
-          setBlockedCount(blocked);
-        }
-      }
-    };
-
-    fetchSegmentCounts();
-  }, [selectedSegment]);
-
-  // ✅ Função para comprimir imagem (mantém prefixo para preview)
-  const compressImage = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = (event) => {
-        const img = new Image();
-        img.src = event.target?.result as string;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 800;
-          let width = img.width;
-          let height = img.height;
-
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height = (MAX_WIDTH / width) * height;
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width = (MAX_HEIGHT / height) * width;
-              height = MAX_HEIGHT;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          
-          // ✅ MANTÉM o prefixo para funcionar no preview
-          let base64 = canvas.toDataURL('image/jpeg', 0.5);
-          
-          console.log('📷 Imagem comprimida:', {
-            originalSize: file.size,
-            compressedSize: base64.length,
-            reduction: Math.round((1 - base64.length / file.size) * 100) + '%'
-          });
-          
-          // ✅ Retorna COM prefixo (para preview funcionar)
-          resolve(base64);
-        };
-        img.onerror = (error) => reject(error);
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      if (banners.length >= 4) {
-        alert('Máximo de 4 banners permitido.');
-        return;
-      }
-      setIsProcessingImage(true);
-      try {
-        const compressedBase64 = await compressImage(e.target.files[0]);
-        setBanners([...banners, compressedBase64]);
-      } catch (error) {
-        console.error('Erro ao processar imagem:', error);
-        alert('Erro ao processar imagem. Tente uma imagem menor.');
-      }
-      setIsProcessingImage(false);
-    }
-  };
-
-  const removeBanner = (index: number) => {
-    setBanners(banners.filter((_, i) => i !== index));
-  };
-
-  const handleGenerateAI = async () => {
-    if (!productName || !audience) {
-      alert('Preencha o Produto e Público Alvo para gerar com IA.');
-      return;
-    }
-    setIsGenerating(true);
-    const content = await generateCampaignContent(productName, audience, 'Persuasivo e Urgente');
-    setMessage(content);
-    setIsGenerating(false);
-  };
-
-  const getDelay = () => {
-    switch (delayMode) {
-      case 'FAST': return Math.floor(Math.random() * (8000 - 3000) + 3000);
-      case 'MEDIUM': return Math.floor(Math.random() * (20000 - 10000) + 10000);
-      case 'SLOW': return Math.floor(Math.random() * (45000 - 25000) + 25000);
-      default: return 10000;
-    }
-  };
-
-  const handleStartCampaign = async () => {
-    console.log('--- Iniciando Disparo: Texto -> Imagens -> Descadastre ---');
-    setCriticalError(null);
-
-    const canSendCheck = campaignControl.canSend();
-    if (!canSendCheck.allowed) {
-      alert(`${canSendCheck.reason} Tente novamente amanhã ou aumente o limite em Configurações.`);
-      return;
-    }
-
-    if (!message && banners.length === 0) {
-      alert('Digite uma mensagem ou adicione banners.');
-      return;
-    }
-
-    if (!selectedSegment) {
-      alert('Selecione um segmento.');
-      return;
-    }
-
-    const savedAccounts = localStorage.getItem(STORAGE_KEY_ACCOUNTS);
-    const accounts: Account[] = savedAccounts ? JSON.parse(savedAccounts) : [];
-    const connectedAccount = accounts.find(a => a.status === 'CONNECTED');
-
-    if (!connectedAccount) {
-      alert('ERRO: Nenhuma conta WhatsApp conectada! Vá em Conexões e conecte uma conta.');
-      return;
-    }
-
-    console.log('Conta usada:', connectedAccount.name, connectedAccount.zApiUrl ? 'Z-API' : 'Evolution');
-
-    // Buscar contatos do MongoDB
-    let targetContacts: Contact[] = [];
+// ============================================
+// CORS ATUALIZADO PARA PRODUÇÃO
+// ============================================
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
     
-    try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
-      const response = await fetch(`${apiUrl}/api/contacts`);
-      
-      if (response.ok) {
-        const allContacts: Contact[] = await response.json();
-        targetContacts = allContacts.filter(c => 
-          c.tags?.includes(selectedSegment) && c.status !== ContactStatus.BLOCKED
-        );
-      } else {
-        // Fallback localStorage
-        const savedContacts = localStorage.getItem(STORAGE_KEY_CONTACTS);
-        const allContacts: Contact[] = savedContacts ? JSON.parse(savedContacts) : [];
-        targetContacts = allContacts.filter(c => 
-          c.tags?.includes(selectedSegment) && c.status !== ContactStatus.BLOCKED
-        );
-      }
-    } catch (error) {
-      console.error('Erro ao buscar contatos:', error);
-      
-      // Fallback localStorage
-      const savedContacts = localStorage.getItem(STORAGE_KEY_CONTACTS);
-      const allContacts: Contact[] = savedContacts ? JSON.parse(savedContacts) : [];
-      targetContacts = allContacts.filter(c => 
-        c.tags?.includes(selectedSegment) && c.status !== ContactStatus.BLOCKED
-      );
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://localhost:5174',
+    ];
+    
+    if (origin.endsWith('.vercel.app')) {
+      return callback(null, true);
     }
-
-    if (targetContacts.length === 0) {
-      alert('Nenhum contato disponível neste segmento.');
-      return;
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
     }
+    
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-    setCampaignStatus('SENDING');
-    setProgress({ sent: 0, failed: 0, total: targetContacts.length });
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-    for (let i = 0; i < targetContacts.length; i++) {
-      const contact = targetContacts[i];
-      setCurrentContactName(contact.name);
+// ============================================
+// MONGODB CONNECTION (LAZY)
+// ============================================
+let isConnected = false;
 
-      let mainMessage = message;
-      if (ctaText && ctaLink) {
-        mainMessage += `\n\n${ctaText}: ${ctaLink}`;
-      }
-
-      const footerMessage = `Caso não queira receber mais mensagens, responda Sair.`;
-      console.log(`Enviando ${i + 1}/${targetContacts.length} para ${contact.phone}...`);
-
-      let contactSuccess = true;
-      let contactError: string | null = null;
-
-      try {
-        // ETAPA 1: Texto
-        if (mainMessage.trim()) {
-          const textResult = await apiService.sendMessage(connectedAccount, contact.phone, mainMessage);
-          if (!textResult.success) {
-            contactSuccess = false;
-            contactError = textResult.error || 'Erro desconhecido';
-          }
-          if (contactSuccess && banners.length > 0 && mainMessage.trim()) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-          }
-        }
-
-        // ETAPA 2: Imagens
-        if (contactSuccess && banners.length > 0) {
-          for (const banner of banners) {
-            const imgResult = await apiService.sendMessage(connectedAccount, contact.phone, '', banner);
-            if (!imgResult.success) {
-              contactSuccess = false;
-              contactError = imgResult.error || 'Erro ao enviar imagem';
-              break;
-            }
-            if (banners.length > 1) {
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          }
-        }
-
-        // ETAPA 3: Descadastre
-        if (contactSuccess && unsubscribe) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const footerResult = await apiService.sendMessage(connectedAccount, contact.phone, footerMessage);
-          if (!footerResult.success) {
-            console.warn('Falha ao enviar footer de descadastre:', footerResult.error);
-          }
-        }
-      } catch (err: any) {
-        console.error('Erro crítico no loop:', err);
-        contactSuccess = false;
-        contactError = err.message;
-      }
-
-      if (contactSuccess) {
-        setProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
-        const newStats = campaignControl.incrementSent();
-        setStats(newStats);
-        setMessagesSinceLastPause(prev => prev + 1);
-      } else {
-        setProgress(prev => ({ ...prev, failed: prev.failed + 1 }));
-        const newStats = campaignControl.incrementFailed();
-        setStats(newStats);
-        
-        if (contactError?.includes('client-token is not configured')) {
-          setCriticalError('ERRO CRÍTICO: Sua Z-API exige um Client-Token. Vá na aba Conexões e preencha.');
-          setCampaignStatus('PAUSED');
-          return;
-        }
-      }
-
-      const canContinue = campaignControl.canSend();
-      if (!canContinue.allowed) {
-        alert(`Campanha pausada!\n${canContinue.reason}\n\n${progress.sent + 1} enviadas de ${targetContacts.length} (${i + 1} processadas)`);
-        setCampaignStatus('COMPLETED');
-        return;
-      }
-
-      if (campaignControl.shouldPause(messagesSinceLastPause) && i < targetContacts.length - 1) {
-        const pauseDuration = campaignControl.getPauseDuration();
-        setIsPausing(true);
-        setCampaignStatus('PAUSED');
-        campaignControl.registerPause();
-        
-        console.log(`⏸ PAUSA AUTOMÁTICA: ${settings.pauseDuration} minutos após ${messagesSinceLastPause} mensagens`);
-        
-        const pauseEnd = Date.now() + pauseDuration;
-        const pauseInterval = setInterval(() => {
-          const remaining = Math.max(0, pauseEnd - Date.now());
-          setPauseTimeRemaining(remaining);
-          if (remaining === 0) {
-            clearInterval(pauseInterval);
-            setIsPausing(false);
-            setPauseTimeRemaining(0);
-            setCampaignStatus('SENDING');
-            console.log('▶ Retomando envios...');
-          }
-        }, 1000);
-        
-        await new Promise(resolve => setTimeout(resolve, pauseDuration));
-        setMessagesSinceLastPause(0);
-      }
-
-      if (i < targetContacts.length - 1) {
-        const delay = getDelay();
-        console.log(`Aguardando ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-
-    setCampaignStatus('COMPLETED');
-    alert('Disparo finalizado!');
-  };
-
-  const aspectClass = aspectRatio === '16:9' ? 'aspect-video' : 'aspect-[9/16]';
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-3xl font-bold text-white">Criar Disparo</h2>
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 transition-colors"
-        >
-          <Activity size={18} />
-          Configurações
-        </button>
-      </div>
-
-      {/* Dashboard de Saúde da Conta */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-card border border-gray-700 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">Saúde da Conta</span>
-            <span className="text-2xl">{campaignControl.getAccountStatus().icon}</span>
-          </div>
-          <div className={`text-lg font-bold ${campaignControl.getAccountStatus().color}`}>
-            {campaignControl.getAccountStatus().health}
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {campaignControl.getAccountStatus().message}
-          </div>
-        </div>
-
-        <div className="bg-card border border-gray-700 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">Taxa de Entrega</span>
-            <CheckCircle2 size={20} className="text-green-500" />
-          </div>
-          <div className="text-2xl font-bold text-white">{stats.deliveryRate}%</div>
-          <div className="text-xs text-gray-500 mt-1">{stats.todaySent} enviadas</div>
-        </div>
-
-        <div className="bg-card border border-gray-700 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">Limite Diário</span>
-            <ShieldCheck size={20} className="text-blue-500" />
-          </div>
-          <div className="text-2xl font-bold text-white">
-            {stats.todaySent + stats.todayFailed}/{settings.dailyLimit}
-          </div>
-          <div className="text-xs text-gray-500 mt-1">{campaignControl.canSend().remaining} restantes</div>
-        </div>
-
-        <div className="bg-card border border-gray-700 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">Falhas</span>
-            <AlertTriangle size={20} className="text-red-500" />
-          </div>
-          <div className="text-2xl font-bold text-white">{stats.todayFailed}</div>
-          <div className="text-xs text-gray-500 mt-1">{stats.todayFailed > 0 ? 'Verificar conexão' : 'Tudo OK'}</div>
-        </div>
-      </div>
-
-      {/* Modal de Configurações */}
-      {showSettings && (
-        <div className="bg-card border border-gray-700 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-white">Configurações de Proteção</h3>
-            <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-white">
-              <X size={20} />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Idade da Conta</label>
-              <select
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white"
-                value={settings.accountAge}
-                onChange={(e) => {
-                  const age = e.target.value as 'NEW' | 'MEDIUM' | 'OLD';
-                  const newSettings = { ...settings, accountAge: age };
-                  const info = ACCOUNT_AGE_INFO[age];
-                  newSettings.dailyLimit = info.dailyLimit;
-                  setSettings(newSettings);
-                  campaignControl.saveSettings(newSettings);
-                  setDelayMode(info.recommendedMode);
-                }}
-              >
-                <option value="NEW">Nova (0-30 dias) - Limite 100/dia</option>
-                <option value="MEDIUM">Média (1-6 meses) - Limite 400/dia</option>
-                <option value="OLD">Antiga (6+ meses) - Limite 800/dia</option>
-              </select>
-              <p className="text-xs text-gray-500 mt-1">{ACCOUNT_AGE_INFO[settings.accountAge].description}</p>
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Limite Diário (manual)</label>
-              <input
-                type="number"
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white"
-                value={settings.dailyLimit}
-                onChange={(e) => {
-                  const newSettings = { ...settings, dailyLimit: parseInt(e.target.value) || 100 };
-                  setSettings(newSettings);
-                  campaignControl.saveSettings(newSettings);
-                }}
-                min={10}
-                max={5000}
-              />
-              <p className="text-xs text-gray-500 mt-1">Máximo de mensagens por dia</p>
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Pausar Após (mensagens)</label>
-              <input
-                type="number"
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white"
-                value={settings.pauseAfter}
-                onChange={(e) => {
-                  const newSettings = { ...settings, pauseAfter: parseInt(e.target.value) || 50 };
-                  setSettings(newSettings);
-                  campaignControl.saveSettings(newSettings);
-                }}
-                min={10}
-                max={500}
-              />
-              <p className="text-xs text-gray-500 mt-1">Sistema pausará automaticamente</p>
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Duração da Pausa (minutos)</label>
-              <input
-                type="number"
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white"
-                value={settings.pauseDuration}
-                onChange={(e) => {
-                  const newSettings = { ...settings, pauseDuration: parseInt(e.target.value) || 15 };
-                  setSettings(newSettings);
-                  campaignControl.saveSettings(newSettings);
-                }}
-                min={5}
-                max={60}
-              />
-              <p className="text-xs text-gray-500 mt-1">Tempo de descanso automático</p>
-            </div>
-          </div>
-
-          <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <p className="text-sm text-blue-300">
-              <strong>💡 Recomendação:</strong> {ACCOUNT_AGE_INFO[settings.accountAge].label} deve usar modo <strong>{ACCOUNT_AGE_INFO[settings.accountAge].recommendedMode}</strong> com risco <strong>{ACCOUNT_AGE_INFO[settings.accountAge].risk}</strong>
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Indicador de Pausa */}
-      {isPausing && (
-        <div className="bg-yellow-500/20 border-l-4 border-yellow-500 p-4 rounded animate-pulse">
-          <div className="flex items-center">
-            <Pause className="text-yellow-500 mr-2" size={20} />
-            <div className="flex-1">
-              <p className="font-bold text-yellow-200">Pausa Automática Ativa</p>
-              <p className="text-sm text-yellow-300">
-                Tempo restante: {Math.ceil(pauseTimeRemaining / 1000)} segundos
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {criticalError && (
-        <div className="bg-red-500/20 border-l-4 border-red-500 p-4 rounded animate-in slide-in-from-top mb-4">
-          <div className="flex items-start">
-            <AlertTriangle className="text-red-500 mr-2 flex-shrink-0" size={20} />
-            <div>
-              <p className="font-bold text-red-200">Disparo Interrompido</p>
-              <p className="text-sm text-red-300">{criticalError}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column - Configuration */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* 1. Targeting Settings */}
-          <div className="bg-card border border-gray-700 rounded-2xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-              <Users className="mr-2 text-primary" size={20} />
-              Segmentação e Risco
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Selecione a Lista (Segmento)</label>
-                <select
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white focus:border-primary focus:outline-none"
-                  value={selectedSegment}
-                  onChange={(e) => setSelectedSegment(e.target.value)}
-                  disabled={campaignStatus === 'SENDING'}
-                >
-                  {availableSegments.length === 0 ? (
-                    <option value="">Nenhum segmento encontrado</option>
-                  ) : (
-                    availableSegments.map(seg => (
-                      <option key={seg} value={seg}>{seg}</option>
-                    ))
-                  )}
-                </select>
-                <div className="flex items-center justify-between mt-1">
-                  <p className="text-xs text-green-400 flex items-center">
-                    <Users size={12} className="mr-1" />
-                    {contactsCount} aptos
-                  </p>
-                  {blockedCount > 0 && (
-                    <p className="text-xs text-red-400 flex items-center font-bold" title="Estes contatos estão na Blacklist e não receberão mensagens">
-                      <ShieldBan size={12} className="mr-1" />
-                      {blockedCount} bloqueados (serão ignorados)
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Intervalo de Envio (Segurança)</label>
-                <select
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white"
-                  value={delayMode}
-                  onChange={(e) => setDelayMode(e.target.value as any)}
-                  disabled={campaignStatus === 'SENDING'}
-                >
-                  <option value="SLOW">Lento (25s - 45s) - Seguro</option>
-                  <option value="MEDIUM">Médio (10s - 20s) - Padrão</option>
-                  <option value="FAST">Rápido (3s - 8s) - Alto Risco</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* 2. Banners */}
-          <div className="bg-card border border-gray-700 rounded-2xl p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-white">Mídia (Até 4 Banners)</h3>
-              <span className="text-xs text-gray-400">{banners.length}/4</span>
-            </div>
-
-            <div className="flex space-x-4 mb-6">
-              <button
-                onClick={() => setAspectRatio('16:9')}
-                disabled={campaignStatus === 'SENDING'}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm border transition-all ${
-                  aspectRatio === '16:9'
-                    ? 'bg-primary/20 border-primary text-white'
-                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                <Monitor size={16} />
-                <span>Horizontal (16:9)</span>
-              </button>
-              <button
-                onClick={() => setAspectRatio('9:16')}
-                disabled={campaignStatus === 'SENDING'}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm border transition-all ${
-                  aspectRatio === '9:16'
-                    ? 'bg-primary/20 border-primary text-white'
-                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                <Smartphone size={16} />
-                <span>Vertical (9:16)</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {banners.map((banner, index) => (
-                <div key={index} className={`relative ${aspectClass} bg-gray-800 rounded-lg overflow-hidden border border-gray-600 group`}>
-                  <img src={banner} alt="Preview" className="w-full h-full object-cover" />
-                  <button
-                    onClick={() => removeBanner(index)}
-                    disabled={campaignStatus === 'SENDING'}
-                    className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X size={14} />
-                  </button>
-                  <div className="absolute bottom-2 right-2 bg-black/50 text-white text-[10px] px-1.5 rounded">
-                    {index + 1}
-                  </div>
-                </div>
-              ))}
-
-              {banners.length < 4 && (
-                <label className={`relative ${aspectClass} border-2 border-dashed border-gray-600 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-gray-800 transition-all text-gray-500 hover:text-primary ${
-                  campaignStatus === 'SENDING' ? 'opacity-50 pointer-events-none' : ''
-                }`}>
-                  {isProcessingImage ? (
-                    <>
-                      <Loader2 className="animate-spin mb-2" size={24} />
-                      <span className="text-xs text-center">Otimizando...</span>
-                      <span className="text-[10px] opacity-70">Aguarde</span>
-                    </>
-                  ) : (
-                    <>
-                      <ImageIcon size={24} className="mb-2" />
-                      <span className="text-xs text-center">Adicionar Imagem</span>
-                      <span className="text-[10px] opacity-70">{aspectRatio}</span>
-                    </>
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleImageUpload}
-                    disabled={campaignStatus === 'SENDING' || isProcessingImage}
-                  />
-                </label>
-              )}
-            </div>
-            <p className="text-[10px] text-gray-500 mt-2">Ordem: Texto {'>'} Imagens {'>'} Descadastre.</p>
-          </div>
-
-          {/* 3. Message Content + AI */}
-          <div className="bg-card border border-gray-700 rounded-2xl p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-white">Conteúdo da Mensagem</h3>
-              <button
-                onClick={handleGenerateAI}
-                disabled={isGenerating || campaignStatus === 'SENDING'}
-                className="flex items-center space-x-1 text-xs bg-purple-600/20 text-purple-300 px-3 py-1.5 rounded-full border border-purple-500/30 hover:bg-purple-600/30 transition-colors disabled:opacity-50"
-              >
-                <Wand2 size={14} />
-                <span>{isGenerating ? 'Gerando...' : 'Gerar com IA'}</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <input
-                type="text"
-                placeholder="Produto (ex: Tênis Corrida)"
-                className="bg-gray-900 border border-gray-700 rounded p-2 text-sm text-white"
-                value={productName}
-                onChange={(e) => setProductName(e.target.value)}
-                disabled={campaignStatus === 'SENDING'}
-              />
-              <input
-                type="text"
-                placeholder="Público (ex: Atletas)"
-                className="bg-gray-900 border border-gray-700 rounded p-2 text-sm text-white"
-                value={audience}
-                onChange={(e) => setAudience(e.target.value)}
-                disabled={campaignStatus === 'SENDING'}
-              />
-            </div>
-
-            <textarea
-              className="w-full h-40 bg-gray-900 border border-gray-700 rounded-xl p-4 text-white focus:ring-2 focus:ring-primary focus:outline-none resize-none disabled:opacity-50"
-              placeholder="Digite sua mensagem aqui..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              disabled={campaignStatus === 'SENDING'}
-            />
-
-            {/* CTA + Unsubscribe */}
-            <div className="mt-6 space-y-4 border-t border-gray-700 pt-6">
-              <div>
-                <label className="text-sm text-gray-400 mb-2 block">Botão de Ação (CTA)</label>
-                <div className="flex gap-4">
-                  <input
-                    type="text"
-                    placeholder="Texto (ex: Comprar Agora)"
-                    className="flex-1 bg-gray-900 border border-gray-700 rounded p-2 text-white text-sm disabled:opacity-50"
-                    value={ctaText}
-                    onChange={(e) => setCtaText(e.target.value)}
-                    disabled={campaignStatus === 'SENDING'}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Link (https://...)"
-                    className="flex-1 bg-gray-900 border border-gray-700 rounded p-2 text-white text-sm disabled:opacity-50"
-                    value={ctaLink}
-                    onChange={(e) => setCtaLink(e.target.value)}
-                    disabled={campaignStatus === 'SENDING'}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between bg-gray-800/50 p-3 rounded-lg">
-                <div className="flex flex-col">
-                  <span className="text-white text-sm font-medium">Opção de Descadastre</span>
-                  <span className="text-xs text-gray-500">Enviar "Caso não queira receber mais mensagens, responda Sair." no final.</span>
-                </div>
-                <button
-                  onClick={() => setUnsubscribe(!unsubscribe)}
-                  disabled={campaignStatus === 'SENDING'}
-                  className={`w-12 h-6 rounded-full relative transition-colors ${
-                    unsubscribe ? 'bg-primary' : 'bg-gray-600'
-                  }`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                    unsubscribe ? 'left-7' : 'left-1'
-                  }`} />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column - Preview + Status */}
-        <div className="lg:col-span-1 space-y-6">
-          {/* Sending Status Overlay */}
-          {(campaignStatus !== 'IDLE' && campaignStatus !== 'PAUSED') && (
-            <div className="bg-card border border-gray-700 rounded-2xl p-6 shadow-xl animate-in slide-in-from-bottom">
-              <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-                {campaignStatus === 'SENDING' ? (
-                  <Loader2 className="animate-spin mr-2 text-primary" />
-                ) : (
-                  <CheckCircle2 className="mr-2 text-green-500" />
-                )}
-                {campaignStatus === 'SENDING' ? 'Disparando...' : 'Finalizado'}
-              </h3>
-
-              <div className="space-y-2 mb-4">
-                <div className="flex justify-between text-sm text-gray-400">
-                  <span>Progresso</span>
-                  <span>{Math.round(((progress.sent + progress.failed) / progress.total) * 100)}%</span>
-                </div>
-                <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary transition-all duration-500"
-                    style={{ width: `${((progress.sent + progress.failed) / progress.total) * 100}%` }}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 text-center mb-4">
-                <div className="bg-green-500/10 rounded-lg p-2">
-                  <div className="text-xl font-bold text-green-500">{progress.sent}</div>
-                  <div className="text-xs text-green-300">Enviados</div>
-                </div>
-                <div className="bg-red-500/10 rounded-lg p-2">
-                  <div className="text-xl font-bold text-red-500">{progress.failed}</div>
-                  <div className="text-xs text-red-300">Falhas</div>
-                </div>
-              </div>
-
-              {campaignStatus === 'SENDING' && (
-                <div className="text-xs text-center text-gray-500 animate-pulse">
-                  Enviando para <span className="text-white font-bold">{currentContactName}</span>
-                </div>
-              )}
-
-              {campaignStatus === 'COMPLETED' && (
-                <button
-                  onClick={() => setCampaignStatus('IDLE')}
-                  className="w-full py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm"
-                >
-                  Novo Disparo
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Preview */}
-          <div className={`sticky top-6 ${campaignStatus === 'SENDING' ? 'opacity-50 pointer-events-none' : ''}`}>
-            <h3 className="text-lg font-semibold text-white mb-4">Pré-visualização</h3>
-            <div className="bg-[#0b141a] border-[8px] border-gray-800 rounded-[3rem] h-[600px] overflow-hidden relative shadow-2xl">
-              {/* Mock Phone Header */}
-              <div className="bg-[#202c33] px-4 py-3 flex items-center space-x-3 border-b border-gray-800">
-                <div className="w-8 h-8 rounded-full bg-gray-500" />
-                <div className="flex-1">
-                  <div className="h-2 w-24 bg-gray-600 rounded mb-1" />
-                  <div className="h-1.5 w-16 bg-gray-700 rounded" />
-                </div>
-              </div>
-
-              {/* Mock Chat Area */}
-              <div
-                className="p-4 space-y-4 h-full overflow-y-auto pb-20 scrollbar-none"
-                style={{
-                  backgroundImage: 'url(https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png)',
-                  opacity: 0.9
-                }}
-              >
-                {/* 1. Text Bubble (Top) */}
-                <div className="bg-[#202c33] rounded-lg p-2 max-w-[90%] ml-auto mr-0 shadow-sm mb-2">
-                  <p className="text-white text-sm whitespace-pre-wrap">
-                    {message || 'Sua mensagem aparecerá aqui...'}
-                  </p>
-                  {ctaText && (
-                    <div className="mt-2 pt-2 border-t border-gray-600">
-                      <button className="w-full bg-[#2a3942] text-[#3b82f6] text-xs font-medium py-1.5 px-3 rounded flex items-center justify-center space-x-1 hover:bg-[#32424d]">
-                        <Link size={12} />
-                        <span>{ctaText}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* 2. Image Bubbles (Middle) */}
-                {banners.length > 0 && (
-                  <div className="flex flex-col gap-2 items-end">
-                    {banners.map((b, i) => (
-                      <div key={i} className="bg-[#202c33] p-1 rounded-lg max-w-[80%] shadow-sm">
-                        <img src={b} className={`rounded-lg w-full object-cover ${aspectClass}`} alt="" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* 3. Unsubscribe Bubble (Bottom) */}
-                {unsubscribe && (
-                  <div className="bg-[#202c33] rounded-lg p-2 max-w-[85%] ml-auto mr-0 shadow-sm mt-2 opacity-80">
-                    <p className="text-gray-300 text-xs text-center">
-                      Caso não queira receber mais mensagens, responda Sair.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {campaignStatus === 'IDLE' && (
-              <div className="mt-6 space-y-3">
-                <button
-                  onClick={handleStartCampaign}
-                  className="w-full bg-primary hover:bg-emerald-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-primary/20 flex items-center justify-center space-x-2 transition-all transform hover:scale-1.02"
-                >
-                  <Play size={20} />
-                  <span>Iniciar Disparo</span>
-                </button>
-
-                <div className="flex items-center justify-center text-xs text-gray-500 space-x-1">
-                  <Clock size={12} />
-                  <span>
-                    Tempo estimado: {Math.ceil(contactsCount * (delayMode === 'FAST' ? 5 : delayMode === 'MEDIUM' ? 15 : 35) / 60)} min
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+const connectDB = async () => {
+  if (isConnected) return;
+  
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
+    isConnected = true;
+    console.log('✅ MongoDB conectado');
+  } catch (error) {
+    console.error('❌ Erro MongoDB:', error.message);
+    throw error;
+  }
 };
 
-export default Campaigns;
+// ============================================
+// SCHEMAS
+// ============================================
+const contactSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  phone: { type: String, required: true, unique: true },
+  tags: [String],
+  status: { type: String, enum: ['VALID', 'INVALID', 'UNKNOWN', 'BLOCKED'], default: 'VALID' },
+  lastInteraction: Date
+}, { timestamps: true });
+
+const accountSchema = new mongoose.Schema({
+  name: String,
+  instanceName: String,
+  phoneNumber: { type: String, unique: true, sparse: true },
+  status: { type: String, enum: ['CONNECTED', 'DISCONNECTED', 'SCANNING'], default: 'DISCONNECTED' },
+  connectionType: String,
+  zApiUrl: String,
+  zApiClientToken: String,
+  zApiId: String,
+  zApiToken: String,
+  battery: Number,
+  avatarUrl: String
+}, { timestamps: true });
+
+const messageSchema = new mongoose.Schema({
+  messageId: { type: String, unique: true, sparse: true },
+  phone: { type: String, required: true },
+  sender: { type: String, enum: ['user', 'agent', 'system'], default: 'user' },
+  text: String,
+  timestamp: { type: Date, default: Date.now },
+  fromMe: { type: Boolean, default: false },
+  accountId: mongoose.Schema.Types.ObjectId,
+  metadata: mongoose.Schema.Types.Mixed
+}, { timestamps: true });
+
+messageSchema.index({ phone: 1, timestamp: -1 });
+
+const chatSchema = new mongoose.Schema({
+  chatId: { type: String, unique: true },
+  contactId: mongoose.Schema.Types.ObjectId,
+  contactName: String,
+  phone: String,
+  lastMessage: String,
+  unreadCount: { type: Number, default: 0 },
+  accountId: mongoose.Schema.Types.ObjectId,
+  lastMessageAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+const campaignSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  status: {
+    type: String,
+    enum: ['DRAFT', 'SCHEDULED', 'SENDING', 'COMPLETED', 'PAUSED', 'CANCELLED'],
+    default: 'DRAFT'
+  },
+  message: String,
+  banners: [String],
+  ctaText: String,
+  ctaLink: String,
+  unsubscribeEnabled: { type: Boolean, default: true },
+  sent: { type: Number, default: 0 },
+  total: { type: Number, default: 0 },
+  failed: { type: Number, default: 0 },
+  delivered: { type: Number, default: 0 },
+  sendMode: { type: String, enum: ['IMMEDIATE', 'SCHEDULED'], default: 'IMMEDIATE' },
+  delayBetweenMessages: { type: Number, default: 3000 },
+  targetTags: [String],
+  excludeBlocked: { type: Boolean, default: true },
+  accountId: mongoose.Schema.Types.ObjectId,
+  scheduledFor: Date,
+  startedAt: Date,
+  completedAt: Date
+}, { timestamps: true });
+
+campaignSchema.index({ status: 1, createdAt: -1 });
+
+const Contact = mongoose.model('Contact', contactSchema);
+const Account = mongoose.model('Account', accountSchema);
+const Message = mongoose.model('Message', messageSchema);
+const Chat = mongoose.model('Chat', chatSchema);
+const Campaign = mongoose.model('Campaign', campaignSchema);
+
+// ============================================
+// ROUTES - CONTACTS
+// ============================================
+app.get('/api/contacts', async (req, res) => {
+  try {
+    await connectDB();
+    const { status, tag, search } = req.query;
+    let query = {};
+    
+    if (status) query.status = status;
+    if (tag) query.tags = tag;
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, 'i') },
+        { phone: new RegExp(search, 'i') }
+      ];
+    }
+    
+    const contacts = await Contact.find(query).sort({ createdAt: -1 });
+    res.json(contacts);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/contacts', async (req, res) => {
+  try {
+    await connectDB();
+    const contact = new Contact(req.body);
+    await contact.save();
+    res.status(201).json(contact);
+  } catch (error) {
+    if (error.code === 11000) {
+      res.status(400).json({ error: 'Telefone já cadastrado' });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+app.post('/api/contacts/bulk', async (req, res) => {
+  try {
+    await connectDB();
+    const { contacts } = req.body;
+    const results = await Contact.insertMany(contacts, { ordered: false });
+    res.json({ count: results.length, contacts: results });
+  } catch (error) {
+    if (error.code === 11000) {
+      const inserted = error.insertedDocs?.length || 0;
+      res.json({ count: inserted, duplicates: error.writeErrors?.length || 0 });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+app.put('/api/contacts/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const contact = await Contact.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
+    res.json(contact);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/contacts/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const contact = await Contact.findByIdAndDelete(req.params.id);
+    if (!contact) return res.status(404).json({ error: 'Contato não encontrado' });
+    res.json({ message: 'Contato excluído' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ROUTES - ACCOUNTS
+// ============================================
+app.get('/api/accounts', async (req, res) => {
+  try {
+    await connectDB();
+    const accounts = await Account.find().sort({ createdAt: -1 });
+    res.json(accounts);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/accounts', async (req, res) => {
+  try {
+    await connectDB();
+    
+    const accountData = { ...req.body };
+    
+    // EXTRAÇÃO AUTOMÁTICA DE DADOS DA URL
+    if (accountData.zApiUrl && !accountData.zApiId && !accountData.zApiToken) {
+      console.log('🔍 Extraindo dados da URL Z-API...');
+      console.log('📋 URL recebida:', accountData.zApiUrl);
+      
+      const urlMatch = accountData.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
+      
+      if (urlMatch && urlMatch.length >= 3) {
+        accountData.zApiId = urlMatch[1];
+        accountData.zApiToken = urlMatch[2];
+        accountData.instanceName = urlMatch[1];
+        
+        console.log('✅ Instance ID extraído:', accountData.zApiId);
+        console.log('✅ Token extraído:', accountData.zApiToken.substring(0, 10) + '...');
+      } else {
+        console.warn('⚠️ Não foi possível extrair dados da URL');
+      }
+    }
+    
+    if (!accountData.name) {
+      accountData.name = accountData.phoneNumber || accountData.instanceName || 'Conexão 1';
+    }
+    
+    if (!accountData.status) {
+      accountData.status = 'CONNECTED';
+    }
+    
+    if (!accountData.connectionType) {
+      accountData.connectionType = 'Z-API';
+    }
+    
+    console.log('💾 Salvando conta com dados:', {
+      name: accountData.name,
+      instanceName: accountData.instanceName,
+      zApiId: accountData.zApiId,
+      hasClientToken: !!accountData.zApiClientToken
+    });
+    
+    const account = new Account(accountData);
+    await account.save();
+    
+    console.log('✅ CONTA CADASTRADA COM SUCESSO:', account.name);
+    res.status(201).json(account);
+  } catch (error) {
+    console.error('❌ Erro ao cadastrar conta:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/accounts/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const account = await Account.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
+    res.json(account);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/accounts/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const account = await Account.findByIdAndDelete(req.params.id);
+    if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
+    res.json({ message: 'Conta excluída' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ROUTES - MESSAGES
+// ============================================
+app.get('/api/messages/:phone', async (req, res) => {
+  try {
+    await connectDB();
+    const messages = await Message.find({ phone: req.params.phone })
+      .sort({ timestamp: -1 })
+      .limit(100);
+    
+    const sanitizedMessages = messages.map(msg => ({
+      ...msg.toObject(),
+      text: msg.text || '',
+      messageId: msg.messageId || `msg_${Date.now()}`,
+      sender: msg.sender || 'user',
+      fromMe: msg.fromMe || false
+    }));
+    
+    res.json(sanitizedMessages);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/messages/:phone', async (req, res) => {
+  try {
+    await connectDB();
+    
+    // Verifica se é um ObjectId (mensagem individual) ou telefone (todas as mensagens)
+    if (mongoose.Types.ObjectId.isValid(req.params.phone)) {
+      // É um ID de mensagem - deletar uma mensagem
+      const message = await Message.findByIdAndDelete(req.params.phone);
+      
+      if (!message) {
+        return res.status(404).json({ error: 'Mensagem não encontrada' });
+      }
+      
+      console.log('✅ Mensagem excluída:', req.params.phone);
+      res.json({ message: 'Mensagem excluída com sucesso', deletedId: req.params.phone });
+    } else {
+      // É um telefone - deletar todas as mensagens
+      await Message.deleteMany({ phone: req.params.phone });
+      console.log('✅ Mensagens excluídas para:', req.params.phone);
+      res.json({ message: 'Mensagens excluídas' });
+    }
+  } catch (error) {
+    console.error('❌ Erro ao excluir mensagem(ns):', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ROUTES - CHATS
+// ============================================
+app.get('/api/chats', async (req, res) => {
+  try {
+    await connectDB();
+    const chats = await Chat.find()
+      .sort({ lastMessageAt: -1 })
+      .limit(50);
+    res.json(chats);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE CHAT (CONVERSA INTEIRA)
+app.delete('/api/chats/:phone', async (req, res) => {
+  try {
+    await connectDB();
+    
+    const phone = req.params.phone.replace(/\D/g, '');
+    
+    // Deletar chat
+    const chat = await Chat.findOneAndDelete({ phone });
+    
+    if (!chat) {
+      return res.status(404).json({ error: 'Chat não encontrado' });
+    }
+    
+    console.log('✅ Chat excluído:', phone);
+    res.json({ message: 'Chat excluído com sucesso', phone });
+  } catch (error) {
+    console.error('❌ Erro ao excluir chat:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ROUTES - CAMPAIGNS
+// ============================================
+app.get('/api/campaigns', async (req, res) => {
+  try {
+    await connectDB();
+    const campaigns = await Campaign.find()
+      .populate('accountId')
+      .sort({ createdAt: -1 });
+    res.json(campaigns);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/campaigns', async (req, res) => {
+  try {
+    await connectDB();
+    const campaign = new Campaign(req.body);
+    await campaign.save();
+    res.status(201).json(campaign);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/campaigns/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const campaign = await Campaign.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada' });
+    res.json(campaign);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ROTA DE DEBUG - TESTE Z-API
+// ============================================
+app.post('/api/test-zapi', async (req, res) => {
+  try {
+    await connectDB();
+    
+    const { phone, message } = req.body;
+    
+    console.log('🔍 DEBUG - Buscando conta...');
+    
+    const account = await Account.findOne({ 
+      zApiUrl: { $exists: true, $ne: '' }
+    }).sort({ createdAt: -1 });
+    
+    const totalAccounts = await Account.countDocuments();
+    
+    console.log(`📊 Total de contas no banco: ${totalAccounts}`);
+    
+    if (!account) {
+      console.log('❌ Nenhuma conta encontrada com zApiUrl');
+      return res.json({ 
+        error: 'Nenhuma conta encontrada',
+        totalAccounts: totalAccounts,
+        debug: 'Nenhuma conta tem zApiUrl configurado'
+      });
+    }
+    
+    console.log('✅ Conta encontrada:', account.name);
+    console.log('📋 URL:', account.zApiUrl);
+    
+    const instanceMatch = account.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
+    
+    if (!instanceMatch) {
+      console.log('❌ URL mal formatada');
+      return res.json({
+        error: 'URL inválida - regex não deu match',
+        accountName: account.name,
+        url: account.zApiUrl,
+        totalAccounts
+      });
+    }
+    
+    const [, instanceId, token] = instanceMatch;
+    const sendUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
+    
+    console.log('🔑 Instance:', instanceId);
+    console.log('🔐 Token:', token.substring(0, 10) + '...');
+    console.log('🌐 Send URL:', sendUrl);
+    
+    const response = await fetch(sendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Client-Token': account.zApiClientToken || ''
+      },
+      body: JSON.stringify({
+        phone: phone.replace(/\D/g, ''),
+        message: message || 'Teste debug'
+      })
+    });
+    
+    const data = await response.json();
+    
+    console.log('📨 Status HTTP:', response.status);
+    console.log('📨 Resposta Z-API:', data);
+    
+    res.json({
+      success: true,
+      accountFound: account.name,
+      totalAccounts,
+      instanceId,
+      token: token.substring(0, 10) + '...',
+      sendUrl,
+      zapiStatus: response.status,
+      zapiResponse: data,
+      sentSuccess: response.ok && data.messageId ? true : false
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no debug:', error);
+    res.json({ error: error.message, stack: error.stack });
+  }
+});
+
+// ============================================
+// SEND MESSAGE VIA Z-API
+// ============================================
+app.post('/api/send-message', async (req, res) => {
+  try {
+    await connectDB();
+    const { phone, message } = req.body;
+    
+    if (!phone || !message) {
+      return res.status(400).json({ error: 'Phone e message são obrigatórios' });
+    }
+    
+    console.log('📤 Tentando enviar mensagem para:', phone);
+    console.log('💬 Mensagem:', message);
+    
+    const connectedAccount = await Account.findOne({
+      zApiUrl: { $exists: true, $ne: '' }
+    }).sort({ createdAt: -1 });
+    
+    let messageId = `msg_${Date.now()}`;
+    let sentViaZapi = false;
+    let zapiData = null;
+    
+    if (connectedAccount && connectedAccount.zApiUrl) {
+      try {
+        console.log('✅ Conta encontrada:', connectedAccount.name);
+        console.log('📋 URL original:', connectedAccount.zApiUrl);
+        
+        const urlPattern = /instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i;
+        const urlMatch = connectedAccount.zApiUrl.match(urlPattern);
+        
+        if (!urlMatch || urlMatch.length < 3) {
+          console.error('❌ ERRO: URL Z-API inválida!');
+          throw new Error('URL Z-API mal formatada');
+        }
+        
+        const instanceId = urlMatch[1];
+        const token = urlMatch[2];
+        
+        console.log('🔑 Instance ID extraído:', instanceId);
+        console.log('🔐 Token extraído:', token.substring(0, 10) + '...');
+        
+        const sendUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
+        console.log('🌐 URL de envio:', sendUrl);
+        
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        if (connectedAccount.zApiClientToken) {
+          headers['Client-Token'] = connectedAccount.zApiClientToken;
+          console.log('🔐 Client-Token adicionado aos headers');
+        }
+        
+        const cleanPhone = phone.replace(/\D/g, '');
+        console.log('📞 Telefone limpo:', cleanPhone);
+        
+        const payload = {
+          phone: cleanPhone,
+          message: message
+        };
+        
+        console.log('📦 Payload:', JSON.stringify(payload));
+        console.log('📡 Enviando requisição para Z-API...');
+        
+        const zapiResponse = await fetch(sendUrl, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(payload)
+        });
+        
+        zapiData = await zapiResponse.json();
+        
+        console.log('📨 Status da resposta:', zapiResponse.status);
+        console.log('📨 Resposta completa:', JSON.stringify(zapiData, null, 2));
+        
+        if (zapiResponse.ok && (zapiData.messageId || zapiData.success)) {
+          messageId = zapiData.messageId || messageId;
+          sentViaZapi = true;
+          console.log('✅ SUCESSO! Mensagem enviada via Z-API');
+          console.log('✅ Message ID:', messageId);
+        } else {
+          console.error('❌ Resposta Z-API indicou erro:', zapiData);
+        }
+        
+      } catch (zapiError) {
+        console.error('⚠️ Erro ao comunicar com Z-API:', zapiError.message);
+      }
+    } else {
+      console.warn('⚠️ Nenhuma conta Z-API configurada no banco');
+    }
+    
+    const newMessage = new Message({
+      messageId: messageId,
+      phone: phone.replace(/\D/g, ''),
+      sender: 'agent',
+      text: message,
+      fromMe: true,
+      timestamp: new Date(),
+      accountId: connectedAccount?._id,
+      metadata: {
+        source: 'web-interface',
+        zapiResponse: zapiData,
+        accountUsed: connectedAccount?.name,
+        sentViaZapi: sentViaZapi
+      }
+    });
+    
+    await newMessage.save();
+    console.log('💾 Mensagem salva no MongoDB');
+    
+    await Chat.findOneAndUpdate(
+      { phone: phone.replace(/\D/g, '') },
+      {
+        phone: phone.replace(/\D/g, ''),
+        lastMessage: message,
+        lastMessageAt: new Date(),
+        accountId: connectedAccount?._id
+      },
+      { upsert: true, new: true }
+    );
+    
+    console.log('💾 Chat atualizado');
+    
+    const response = {
+      success: true,
+      messageId: messageId,
+      sentViaZapi: sentViaZapi,
+      accountUsed: connectedAccount?.name || 'Nenhuma',
+      zapiResponse: zapiData
+    };
+    
+    console.log('📤 Resposta final:', JSON.stringify(response, null, 2));
+    
+    res.json(response);
+    
+  } catch (error) {
+    console.error('❌ ERRO CRÍTICO:', error.message);
+    res.status(500).json({ 
+      success: false,
+      error: error.message,
+      sentViaZapi: false
+    });
+  }
+});
+
+// ============================================
+// WEBHOOK - Z-API
+// ============================================
+app.post('/webhook', async (req, res) => {
+  try {
+    await connectDB();
+    console.log('📨 Webhook recebido:', JSON.stringify(req.body, null, 2));
+    
+    const { phone, text, fromMe, messageId, message, senderName, pushName, notifyName } = req.body;
+    
+    let messageText = '';
+    
+    if (typeof text === 'string') {
+      messageText = text;
+    } else if (typeof text === 'object' && text !== null) {
+      if (text.message) messageText = text.message;
+      else if (text.text) messageText = text.text;
+    } else if (typeof message === 'string') {
+      messageText = message;
+    } else if (typeof message === 'object' && message !== null) {
+      if (message.text) messageText = message.text;
+      else if (message.message) messageText = message.message;
+      else if (message.conversation) messageText = message.conversation;
+    }
+    
+    if (!messageText && req.body.data && req.body.data.message) {
+      if (typeof req.body.data.message === 'string') {
+        messageText = req.body.data.message;
+      } else if (req.body.data.message.text) {
+        messageText = req.body.data.message.text;
+      }
+    }
+    
+    if (phone && messageText) {
+      const normalizedPhone = phone.replace(/\D/g, '');
+      const contactName = senderName || pushName || notifyName ||
+        req.body.data?.senderName ||
+        req.body.data?.pushName ||
+        req.body.data?.notifyName ||
+        normalizedPhone;
+      
+      const newMessage = new Message({
+        messageId: messageId || `msg_${Date.now()}`,
+        phone: normalizedPhone,
+        sender: fromMe ? 'agent' : 'user',
+        text: messageText,
+        fromMe: fromMe || false,
+        timestamp: new Date(),
+        metadata: req.body
+      });
+      
+      await newMessage.save();
+      
+      await Chat.findOneAndUpdate(
+        { phone: normalizedPhone },
+        {
+          phone: normalizedPhone,
+          contactName: contactName,
+          lastMessage: messageText,
+          lastMessageAt: new Date(),
+          $inc: { unreadCount: fromMe ? 0 : 1 }
+        },
+        { upsert: true, new: true }
+      );
+      
+      console.log('✅ Mensagem salva:', normalizedPhone, '-', messageText);
+    } else {
+      console.log('⚠️ Webhook sem phone ou text válido');
+    }
+    
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('❌ Erro no webhook:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// ROUTE - SEND MESSAGE (Z-API) - OTIMIZADO
+// ============================================
+app.post('/api/send-message', async (req, res) => {
+  try {
+    const { phone, message, image } = req.body;
+    
+    if (!phone) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Phone é obrigatório' 
+      });
+    }
+    
+    if (!message && !image) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Message ou image são obrigatórios' 
+      });
+    }
+    
+    const activeAccount = await Account.findOne({ 
+      status: 'CONNECTED',
+      zApiUrl: { $exists: true, $ne: null }
+    });
+    
+    if (!activeAccount || !activeAccount.zApiUrl) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Nenhuma conta Z-API conectada' 
+      });
+    }
+    
+    const cleanPhone = phone.replace(/\D/g, '');
+    
+    // Limpar URL da Z-API
+    let baseUrl = activeAccount.zApiUrl;
+    if (baseUrl.includes('/token/')) {
+      baseUrl = baseUrl.substring(0, baseUrl.indexOf('/token/'));
+    }
+    if (baseUrl.endsWith('/')) {
+      baseUrl = baseUrl.slice(0, -1);
+    }
+    
+    let endpoint = `${baseUrl}/send-text`;
+    const body = { phone: cleanPhone };
+    
+    if (image) {
+      endpoint = `${baseUrl}/send-image`;
+      
+      // ✅ GARANTIR que tem prefixo data:image
+      let imageToSend = image.trim();
+      if (!imageToSend.startsWith('data:image')) {
+        imageToSend = 'data:image/jpeg;base64,' + imageToSend;
+      }
+      
+      body.image = imageToSend;
+      
+      if (message) {
+        body.caption = message;
+      }
+      
+      console.log('📷 Tamanho da imagem:', imageToSend.length, 'bytes');
+    } else {
+      body.message = message;
+    }
+    
+    const headers = { 'Content-Type': 'application/json' };
+    if (activeAccount.zApiClientToken) {
+      headers['Client-Token'] = activeAccount.zApiClientToken;
+    }
+    
+    console.log('📤 Enviando via Z-API:', {
+      endpoint,
+      phone: cleanPhone,
+      hasMessage: !!message,
+      hasImage: !!image
+    });
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+    
+    const resData = await response.json();
+    
+    if (response.ok) {
+      const msgId = resData.messageId || resData.id || resData.zaapId;
+      console.log('✅ Mensagem enviada via Z-API:', msgId);
+      
+      return res.json({
+        success: true,
+        messageId: msgId
+      });
+    }
+    
+    console.error('❌ Erro Z-API:', resData);
+    return res.status(500).json({
+      success: false,
+      error: resData.message || resData.error || 'Erro ao enviar'
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro ao enviar mensagem:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// ============================================
+// STATS
+// ============================================
+app.get('/api/stats', async (req, res) => {
+  try {
+    await connectDB();
+    
+    const [totalContacts, blockedContacts, validContacts, onlineAccounts, totalMessages, activeCampaigns] = await Promise.all([
+      Contact.countDocuments(),
+      Contact.countDocuments({ status: 'BLOCKED' }),
+      Contact.countDocuments({ status: 'VALID' }),
+      Account.countDocuments({ status: 'CONNECTED' }),
+      Message.countDocuments(),
+      Campaign.countDocuments({ status: { $in: ['SCHEDULED', 'SENDING'] } })
+    ]);
+    
+    res.json({
+      totalContacts,
+      blockedContacts,
+      validContacts,
+      onlineAccounts,
+      totalMessages,
+      activeCampaigns
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// HEALTH CHECK
+// ============================================
+app.get('/health', async (req, res) => {
+  try {
+    await connectDB();
+    const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
+    
+    const connectedAccount = await Account.findOne({
+      zApiUrl: { $exists: true, $ne: '' }
+    }).sort({ createdAt: -1 });
+    
+    res.json({
+      status: 'OK',
+      mongodb: dbStatus,
+      zapiAccount: connectedAccount ? connectedAccount.name : 'Nenhuma conectada',
+      zapiUrl: connectedAccount ? connectedAccount.zApiUrl : null,
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'ERROR', error: error.message });
+  }
+});
+
+// ============================================
+// ROOT
+// ============================================
+app.get('/', (req, res) => {
+  res.json({
+    status: 'Ready',
+    message: 'ZapMaster Backend API',
+    endpoints: {
+      accounts: '/api/accounts',
+      contacts: '/api/contacts',
+      chats: '/api/chats',
+      deleteChat: '/api/chats/:phone',
+      messages: '/api/messages/:phone',
+      deleteMessage: '/api/messages/:id',
+      sendMessage: '/api/send-message',
+      testZapi: '/api/test-zapi',
+      campaigns: '/api/campaigns',
+      webhook: '/webhook',
+      health: '/health',
+      stats: '/api/stats'
+    }
+  });
+});
+
+// ============================================
+// START SERVER
+// ============================================
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`\n🚀 ZapMaster Pro Backend`);
+    console.log(`📂 Servidor: http://localhost:${PORT}`);
+    console.log(`🔗 Webhook: http://localhost:${PORT}/webhook`);
+    console.log(`💚 Health: http://localhost:${PORT}/health`);
+    console.log(`📊 Stats: http://localhost:${PORT}/api/stats\n`);
+  });
+}
+
+module.exports = app;
