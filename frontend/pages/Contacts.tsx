@@ -213,7 +213,7 @@ const Contacts: React.FC = () => {
   };
 
   // ============================================
-  // IMPORTAR CSV/EXCEL
+  // IMPORTAR CONTATOS (CSV: nome, telefone, segmento)
   // ============================================
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -223,34 +223,56 @@ const Contacts: React.FC = () => {
 
     try {
       const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      
+      const lines = text.split(/\r?\n/).filter(line => line.trim());
+
       if (lines.length < 2) {
         alert('❌ Arquivo vazio ou inválido');
-        setIsImporting(false);
         return;
       }
 
-      // Ignora cabeçalho
+      // Cabeçalho
+      const headerRow = lines[0];
+      const header =
+        headerRow.split(';').length > 1 ? headerRow.split(';') : headerRow.split(',');
+      const lowerHeader = header.map(h => h.toLowerCase().trim());
+
+      const idxNome = lowerHeader.indexOf('nome');
+      const idxTelefone = lowerHeader.indexOf('telefone');
+      const idxSegmento = lowerHeader.indexOf('segmento');
+
+      if (idxNome === -1 || idxTelefone === -1 || idxSegmento === -1) {
+        alert('❌ Arquivo deve ter as colunas: nome, telefone e segmento');
+        return;
+      }
+
       const dataLines = lines.slice(1);
-      
-      const contactsToImport = dataLines.map(line => {
-        const [name, phone, tags] = line.split(/[,;]/);
-        return {
-          name: name?.trim() || 'Sem Nome',
-          phone: phone?.replace(/\D/g, '') || '',
-          tags: tags ? tags.split('|').map(t => t.trim()) : [],
-          status: ContactStatus.VALID
-        };
-      }).filter(c => c.phone.length >= 10); // Apenas números válidos
+
+      const contactsToImport = dataLines
+        .map(line => {
+          const cols =
+            line.split(';').length > 1 ? line.split(';') : line.split(',');
+
+          const nome = (cols[idxNome] || '').trim();
+          const telefone = (cols[idxTelefone] || '').replace(/\D/g, '');
+          const segmento = (cols[idxSegmento] || '').trim();
+
+          // Ignora linhas sem telefone
+          if (!telefone) return null;
+
+          return {
+            name: nome || 'Sem Nome',
+            phone: telefone,
+            tags: segmento ? [segmento] : [],
+            status: ContactStatus.VALID
+          };
+        })
+        .filter((c): c is { name: string; phone: string; tags: string[]; status: ContactStatus } => !!c);
 
       if (contactsToImport.length === 0) {
         alert('❌ Nenhum contato válido encontrado no arquivo');
-        setIsImporting(false);
         return;
       }
 
-      // Importar em massa
       const response = await fetch(`${API_BASE_URL}/api/contacts/bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -259,7 +281,11 @@ const Contacts: React.FC = () => {
 
       if (response.ok) {
         const result = await response.json();
-        alert(`✅ ${result.count} contato(s) importado(s)!${result.duplicates ? `\n⚠️ ${result.duplicates} duplicado(s) ignorado(s)` : ''}`);
+        alert(
+          `✅ ${result.count} contato(s) importado(s)!${
+            result.duplicates ? `\n⚠️ ${result.duplicates} duplicado(s) ignorado(s)` : ''
+          }`
+        );
         await loadContacts();
       } else {
         alert('❌ Erro ao importar contatos');
@@ -361,7 +387,6 @@ const Contacts: React.FC = () => {
   // ============================================
   // RENDER
   // ============================================
-  
   const StatusBadge = ({ status }: { status: ContactStatus }) => {
     const styles = {
       [ContactStatus.VALID]: 'bg-green-500/20 text-green-400 border-green-500',
@@ -425,7 +450,7 @@ const Contacts: React.FC = () => {
             {isImporting ? 'Importando...' : 'Importar'}
             <input
               type="file"
-              accept=".csv,.txt,.xlsx,.xls"
+              accept=".csv"
               onChange={handleImportFile}
               disabled={isImporting}
               className="hidden"
