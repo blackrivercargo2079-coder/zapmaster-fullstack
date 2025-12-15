@@ -21,7 +21,7 @@ const STORAGE_KEY_STATS = 'zapmaster_campaign_stats';
 const STORAGE_KEY_DAILY_COUNT = 'zapmaster_daily_count';
 
 // Configurações padrão baseadas na idade da conta
-export const DEFAULT_SETTINGS: Record<string, CampaignSettings> = {
+export const DEFAULT_SETTINGS: Record<'NEW' | 'MEDIUM' | 'OLD', CampaignSettings> = {
   NEW: {
     dailyLimit: 100,
     pauseAfter: 30,
@@ -89,7 +89,7 @@ class CampaignControlService {
   loadDailyStats(): CampaignStats {
     const saved = localStorage.getItem(STORAGE_KEY_STATS);
     const today = new Date().toDateString();
-    
+
     if (saved) {
       const stats = JSON.parse(saved);
       // Se mudou o dia, resetar contadores
@@ -104,7 +104,7 @@ class CampaignControlService {
         accountHealth: this.calculateHealth(stats.todaySent, stats.todayFailed)
       };
     }
-    
+
     return this.resetDailyStats();
   }
 
@@ -162,14 +162,22 @@ class CampaignControlService {
     return Math.round((sent / total) * 100);
   }
 
-  // Calcular saúde da conta
+  // CORRIGIDO: Calcular saúde da conta com mínimo de mensagens
   private calculateHealth(sent: number, failed: number): 'EXCELLENT' | 'GOOD' | 'WARNING' | 'CRITICAL' {
-    const deliveryRate = this.calculateDeliveryRate(sent, failed);
+    const total = sent + failed;
     
-    if (deliveryRate >= 95) return 'EXCELLENT';
-    if (deliveryRate >= 85) return 'GOOD';
-    if (deliveryRate >= 70) return 'WARNING';
-    return 'CRITICAL';
+    // IMPORTANTE: Só avaliar após mínimo de 10 mensagens para evitar falsos positivos
+    if (total < 10) {
+      return 'EXCELLENT'; // Período de aquecimento
+    }
+
+    const deliveryRate = this.calculateDeliveryRate(sent, failed);
+
+    // Thresholds mais realistas e tolerantes
+    if (deliveryRate >= 85) return 'EXCELLENT';  // 85%+ = Excelente (era 95%)
+    if (deliveryRate >= 70) return 'GOOD';       // 70-84% = Bom (era 85%)
+    if (deliveryRate >= 50) return 'WARNING';    // 50-69% = Atenção (era 70%)
+    return 'CRITICAL';                            // <50% = Crítico
   }
 
   // Verificar se pode enviar (limite diário)
@@ -217,7 +225,7 @@ class CampaignControlService {
     return ACCOUNT_AGE_INFO[accountAge].recommendedMode;
   }
 
-  // Obter status da conta
+  // CORRIGIDO: Obter status da conta com informações mais detalhadas
   getAccountStatus(): {
     health: 'EXCELLENT' | 'GOOD' | 'WARNING' | 'CRITICAL';
     color: string;
@@ -225,7 +233,18 @@ class CampaignControlService {
     message: string;
   } {
     const stats = this.loadDailyStats();
-    
+    const total = stats.todaySent + stats.todayFailed;
+
+    // Durante período de aquecimento (menos de 10 mensagens)
+    if (total < 10) {
+      return {
+        health: 'EXCELLENT',
+        color: 'text-green-500',
+        icon: '🟢',
+        message: `Iniciando envios... (${total}/10)`
+      };
+    }
+
     switch (stats.accountHealth) {
       case 'EXCELLENT':
         return {
