@@ -18,7 +18,7 @@ import {
 import * as XLSX from 'xlsx';
 import { Contact, ContactStatus } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://zapmaster-backend.vercel.app';
 
 const Contacts: React.FC = () => {
   const [contacts, setContacts] = useState<Contact[]>([]);

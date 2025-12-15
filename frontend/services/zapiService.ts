@@ -16,5 +16,29 @@ export const zapiService = {
       console.error('Erro ao enviar mensagem:', error);
       return { success: false, error };
     }
+  },
+
+  // ✅ NOVA FUNÇÃO - Verifica WhatsApp de múltiplos contatos
+  async checkWhatsApp(contacts: Array<{ id: string; phone: string }>) {
+    try {
+      console.log(`📱 Verificando ${contacts.length} contato(s)...`);
+      
+      const response = await fetch(`${API_URL}/api/contacts/check-whatsapp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contacts })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('✅ Resposta da verificação:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ Erro ao verificar WhatsApp:', error);
+      return { success: false, error: error.message };
+    }
   }
 };
