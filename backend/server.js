@@ -240,24 +240,25 @@ app.post('/api/contacts/check-whatsapp', async (req, res) => {
       try {
         const cleanPhone = contact.phone.replace(/\D/g, '');
 
-        // Endpoint Z-API para verificar se o número existe no WhatsApp
-        const checkUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/phone-exists`;
+        // ✅ CORRIGIDO: Endpoint Z-API usando GET com phone na URL
+        const checkUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/phone-exists/${cleanPhone}`;
 
-        const headers = {
-          'Content-Type': 'application/json'
-        };
+        const headers = {};
 
         if (account.zApiClientToken) {
           headers['Client-Token'] = account.zApiClientToken;
         }
 
+        console.log(`🔍 Verificando ${cleanPhone} via Z-API...`);
+        console.log(`🔗 URL: ${checkUrl}`);
+
         const response = await fetch(checkUrl, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ phone: cleanPhone })
+          method: 'GET',
+          headers: headers
         });
 
         const data = await response.json();
+        console.log(`📨 Resposta Z-API:`, JSON.stringify(data));
 
         // Z-API retorna exists: true se o número tem WhatsApp
         const hasWhatsApp = data.exists === true || data.numberExists === true;
