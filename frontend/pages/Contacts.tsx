@@ -425,7 +425,7 @@ const Contacts: React.FC = () => {
             {isImporting ? 'Importando...' : 'Importar'}
             <input
               type="file"
-              accept=".csv,.txt"
+              accept=".csv,.txt,.xlsx,.xls"
               onChange={handleImportFile}
               disabled={isImporting}
               className="hidden"
