@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   Ban,
+  Phone,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Contact, ContactStatus } from '../types';
@@ -24,6 +25,7 @@ const Contacts: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isChecking, setIsChecking] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [checkingPhone, setCheckingPhone] = useState<string | null>(null);
 
   // Seleção Múltipla
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
@@ -96,7 +98,7 @@ const Contacts: React.FC = () => {
           name: newContactData.name.trim(),
           phone: newContactData.phone.replace(/\D/g, ''),
           tags: newContactData.tags ? newContactData.tags.split(',').map(t => t.trim()) : [],
-          status: ContactStatus.VALID,
+          status: ContactStatus.UNKNOWN,
         }),
       });
 
@@ -169,11 +171,46 @@ const Contacts: React.FC = () => {
   };
 
   // ============================================
+  // DELETAR CONTATOS SELECIONADOS
+  // ============================================
+  const handleDeleteSelected = async () => {
+    if (selectedContacts.size === 0) {
+      alert('⚠️ Nenhum contato selecionado!');
+      return;
+    }
+
+    if (
+      !confirm(
+        `🗑️ Deseja excluir ${selectedContacts.size} contato(s) selecionado(s)?\n\nEsta ação não pode ser desfeita!`,
+      )
+    ) {
+      return;
+    }
+
+    let deleted = 0;
+    for (const contactId of selectedContacts) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/contacts/${contactId}`, {
+          method: 'DELETE',
+        });
+        if (response.ok) deleted++;
+      } catch (error) {
+        console.error('Erro ao deletar:', error);
+      }
+    }
+
+    alert(`✅ ${deleted} contato(s) excluído(s)!`);
+    setSelectedContacts(new Set());
+    setSelectAll(false);
+    await loadContacts();
+  };
+
+  // ============================================
   // BLOQUEAR/DESBLOQUEAR CONTATO
   // ============================================
   const handleToggleBlock = async (contact: Contact) => {
     const newStatus =
-      contact.status === ContactStatus.BLOCKED ? ContactStatus.VALID : ContactStatus.BLOCKED;
+      contact.status === ContactStatus.BLOCKED ? ContactStatus.UNKNOWN : ContactStatus.BLOCKED;
     const action = newStatus === ContactStatus.BLOCKED ? 'bloquear' : 'desbloquear';
 
     if (!confirm(`Deseja ${action} "${contact.name}"?`)) return;
@@ -233,6 +270,94 @@ const Contacts: React.FC = () => {
   };
 
   // ============================================
+  // VERIFICAR WHATSAPP EM LOTE
+  // ============================================
+  const handleCheckWhatsApp = async () => {
+    const unknownContacts = contacts.filter(c => c.status === ContactStatus.UNKNOWN);
+
+    if (unknownContacts.length === 0) {
+      alert('✅ Não há contatos pendentes de verificação!');
+      return;
+    }
+
+    if (
+      !confirm(
+        `📱 Deseja verificar ${unknownContacts.length} número(s) no WhatsApp?\n\nIsso pode levar alguns minutos.`,
+      )
+    ) {
+      return;
+    }
+
+    setIsChecking(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts/check-whatsapp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contacts: unknownContacts.map(c => ({ id: c.id, phone: c.phone })),
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(
+          `✅ Verificação concluída!\n\n` +
+            `✓ Válidos: ${result.valid || 0}\n` +
+            `✗ Inválidos: ${result.invalid || 0}`,
+        );
+        await loadContacts();
+      } else {
+        alert('❌ Erro ao verificar números no WhatsApp');
+      }
+    } catch (error) {
+      console.error('Erro ao verificar:', error);
+      alert('❌ Erro ao verificar números no WhatsApp');
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  // ============================================
+  // VERIFICAR WHATSAPP INDIVIDUAL
+  // ============================================
+  const handleCheckSingleWhatsApp = async (contact: Contact) => {
+    if (
+      !confirm(
+        `📱 Deseja verificar se o número ${contact.phone} tem WhatsApp?`,
+      )
+    ) {
+      return;
+    }
+
+    setCheckingPhone(contact.id);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/contacts/check-whatsapp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contacts: [{ id: contact.id, phone: contact.phone }],
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const status = result.valid > 0 ? 'válido' : 'inválido';
+        alert(`✅ Verificação concluída!\n\nO número está ${status}.`);
+        await loadContacts();
+      } else {
+        alert('❌ Erro ao verificar número no WhatsApp');
+      }
+    } catch (error) {
+      console.error('Erro ao verificar:', error);
+      alert('❌ Erro ao verificar número no WhatsApp');
+    } finally {
+      setCheckingPhone(null);
+    }
+  };
+
+  // ============================================
   // IMPORTAR CONTATOS (CSV, XLS, XLSX)
   // Colunas obrigatórias: nome, telefone, segmento
   // ============================================
@@ -254,7 +379,9 @@ const Contacts: React.FC = () => {
 
       // ---------- CSV/TXT ----------
       if (ext === 'csv' || ext === 'txt') {
-        const text = await file.text();
+        const arrayBuffer = await file.arrayBuffer();
+        const decoder = new TextDecoder('utf-8');
+        const text = decoder.decode(arrayBuffer);
         const lines = text.split(/\r?\n/).filter(line => line.trim());
 
         if (lines.length < 2) {
@@ -293,7 +420,7 @@ const Contacts: React.FC = () => {
               name: nome || 'Sem Nome',
               phone: telefone,
               tags: segmento ? [segmento] : [],
-              status: ContactStatus.VALID,
+              status: ContactStatus.UNKNOWN,
             };
           })
           .filter(
@@ -310,10 +437,10 @@ const Contacts: React.FC = () => {
       // ---------- XLS / XLSX ----------
       else if (ext === 'xls' || ext === 'xlsx') {
         const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: 'array' });
+        const workbook = XLSX.read(data, { type: 'array', codepage: 65001 }); // UTF-8
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        const json: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const json: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
 
         if (json.length < 2) {
           alert('❌ Arquivo vazio ou inválido');
@@ -346,7 +473,7 @@ const Contacts: React.FC = () => {
               name: nome || 'Sem Nome',
               phone: telefone,
               tags: segmento ? [segmento] : [],
-              status: ContactStatus.VALID,
+              status: ContactStatus.UNKNOWN,
             };
           })
           .filter(
@@ -380,7 +507,7 @@ const Contacts: React.FC = () => {
         alert(
           `✅ ${result.count} contato(s) importado(s)!${
             result.duplicates ? `\n⚠️ ${result.duplicates} duplicado(s) ignorado(s)` : ''
-          }`,
+          }\n\n📱 Use o botão "Verificar WhatsApp" para validar os números.`,
         );
         await loadContacts();
       } else {
@@ -413,7 +540,7 @@ const Contacts: React.FC = () => {
       ),
     ].join('\n');
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = `contatos-${new Date().toISOString().split('T')[0]}.csv`;
@@ -558,6 +685,15 @@ const Contacts: React.FC = () => {
             <Download size={16} />
             Exportar
           </button>
+
+          <button
+            onClick={handleCheckWhatsApp}
+            disabled={isChecking || stats.unknown === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50"
+          >
+            <CheckCircle size={16} className={isChecking ? 'animate-spin' : ''} />
+            {isChecking ? 'Verificando...' : `Verificar WhatsApp (${stats.unknown})`}
+          </button>
         </div>
       </header>
 
@@ -617,14 +753,25 @@ const Contacts: React.FC = () => {
           </button>
         </div>
 
-        <button
-          onClick={handleDeleteInvalidContacts}
-          disabled={stats.invalid === 0}
-          className="px-4 py-2 bg-gray-800 hover:bg-red-600 text-gray-400 hover:text-white rounded-lg transition-colors disabled:opacity-50"
-        >
-          <Trash2 size={16} className="inline mr-2" />
-          Excluir Inválidos ({stats.invalid})
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={handleDeleteSelected}
+            disabled={selectedContacts.size === 0}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50"
+          >
+            <Trash2 size={16} className="inline mr-2" />
+            Excluir Selecionados ({selectedContacts.size})
+          </button>
+
+          <button
+            onClick={handleDeleteInvalidContacts}
+            disabled={stats.invalid === 0}
+            className="px-4 py-2 bg-gray-800 hover:bg-red-600 text-gray-400 hover:text-white rounded-lg transition-colors disabled:opacity-50"
+          >
+            <Trash2 size={16} className="inline mr-2" />
+            Excluir Inválidos ({stats.invalid})
+          </button>
+        </div>
       </div>
 
       {/* Busca */}
@@ -710,6 +857,21 @@ const Contacts: React.FC = () => {
 
                     <td className="p-4">
                       <div className="flex justify-center gap-2">
+                        {contact.status === ContactStatus.UNKNOWN && (
+                          <button
+                            onClick={() => handleCheckSingleWhatsApp(contact)}
+                            disabled={checkingPhone === contact.id}
+                            className="p-2 text-green-400 hover:bg-green-500/20 rounded transition-colors disabled:opacity-50"
+                            title="Verificar WhatsApp"
+                          >
+                            {checkingPhone === contact.id ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                              <Phone size={16} />
+                            )}
+                          </button>
+                        )}
+
                         <button
                           onClick={() => {
                             setEditingContact(contact);
