@@ -50,6 +50,35 @@ const Contacts: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   // ============================================
+  // FUNÇÃO AUXILIAR - NORMALIZAR TELEFONE
+  // ============================================
+  const normalizePhone = (phone: string): string => {
+    const cleaned = phone.replace(/\D/g, '');
+    
+    // Se já tem 13 dígitos (55 + DDD + número), retorna como está
+    if (cleaned.length === 13 && cleaned.startsWith('55')) {
+      return cleaned;
+    }
+    
+    // Se tem 11 dígitos (DDD + número), adiciona 55
+    if (cleaned.length === 11) {
+      return '55' + cleaned;
+    }
+    
+    // Se tem 10 dígitos (DDD + número sem o 9), adiciona 55
+    if (cleaned.length === 10) {
+      return '55' + cleaned;
+    }
+    
+    // Caso contrário, tenta adicionar 55 se não tiver
+    if (!cleaned.startsWith('55') && cleaned.length > 0) {
+      return '55' + cleaned;
+    }
+    
+    return cleaned;
+  };
+
+  // ============================================
   // CARREGAR CONTATOS DO MONGODB
   // ============================================
   const loadContacts = async () => {
@@ -96,7 +125,7 @@ const Contacts: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newContactData.name.trim(),
-          phone: newContactData.phone.replace(/\D/g, ''),
+          phone: normalizePhone(newContactData.phone),
           tags: newContactData.tags ? newContactData.tags.split(',').map(t => t.trim()) : [],
           status: ContactStatus.UNKNOWN,
         }),
@@ -129,7 +158,7 @@ const Contacts: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: editData.name.trim(),
-          phone: editData.phone.replace(/\D/g, ''),
+          phone: normalizePhone(editData.phone),
           tags: editData.tags ? editData.tags.split(',').map(t => t.trim()) : [],
         }),
       });
@@ -411,14 +440,14 @@ const Contacts: React.FC = () => {
               line.split(';').length > 1 ? line.split(';') : line.split(',');
 
             const nome = (cols[idxNome] || '').trim();
-            const telefone = (cols[idxTelefone] || '').replace(/\D/g, '');
+            const telefone = (cols[idxTelefone] || '').trim();
             const segmento = (cols[idxSegmento] || '').trim();
 
             if (!telefone) return null;
 
             return {
               name: nome || 'Sem Nome',
-              phone: telefone,
+              phone: normalizePhone(telefone),
               tags: segmento ? [segmento] : [],
               status: ContactStatus.UNKNOWN,
             };
@@ -462,16 +491,14 @@ const Contacts: React.FC = () => {
         contactsToImport = dataRows
           .map((row: any[]) => {
             const nome = (row[idxNome] || '').toString().trim();
-            const telefone = (row[idxTelefone] || '')
-              .toString()
-              .replace(/\D/g, '');
+            const telefone = (row[idxTelefone] || '').toString().trim();
             const segmento = (row[idxSegmento] || '').toString().trim();
 
             if (!telefone) return null;
 
             return {
               name: nome || 'Sem Nome',
-              phone: telefone,
+              phone: normalizePhone(telefone),
               tags: segmento ? [segmento] : [],
               status: ContactStatus.UNKNOWN,
             };
