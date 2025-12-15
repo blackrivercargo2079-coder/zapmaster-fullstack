@@ -27,6 +27,9 @@ const Contacts: React.FC = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [checkingPhone, setCheckingPhone] = useState<string | null>(null);
 
+  // Progresso da verificação
+  const [checkProgress, setCheckProgress] = useState({ current: 0, total: 0 });
+
   // Seleção Múltipla
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
@@ -299,7 +302,7 @@ const Contacts: React.FC = () => {
   };
 
   // ============================================
-  // VERIFICAR WHATSAPP EM LOTE
+  // VERIFICAR WHATSAPP EM LOTE COM PROGRESSO
   // ============================================
   const handleCheckWhatsApp = async () => {
     const unknownContacts = contacts.filter(c => c.status === ContactStatus.UNKNOWN);
@@ -311,39 +314,60 @@ const Contacts: React.FC = () => {
 
     if (
       !confirm(
-        `📱 Deseja verificar ${unknownContacts.length} número(s) no WhatsApp?\n\nIsso pode levar alguns minutos.`,
+        `📱 Deseja verificar ${unknownContacts.length} número(s) no WhatsApp?\n\nIsso pode levar alguns minutos (2 seg por número).`,
       )
     ) {
       return;
     }
 
     setIsChecking(true);
+    setCheckProgress({ current: 0, total: unknownContacts.length });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/contacts/check-whatsapp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contacts: unknownContacts.map(c => ({ id: c.id, phone: c.phone })),
-        }),
-      });
+      // Verificar em lotes de 5 por vez para mostrar progresso
+      const batchSize = 5;
+      let totalValid = 0;
+      let totalInvalid = 0;
 
-      if (response.ok) {
-        const result = await response.json();
-        alert(
-          `✅ Verificação concluída!\n\n` +
-            `✓ Válidos: ${result.valid || 0}\n` +
-            `✗ Inválidos: ${result.invalid || 0}`,
-        );
-        await loadContacts();
-      } else {
-        alert('❌ Erro ao verificar números no WhatsApp');
+      for (let i = 0; i < unknownContacts.length; i += batchSize) {
+        const batch = unknownContacts.slice(i, i + batchSize);
+        
+        setCheckProgress({ current: i, total: unknownContacts.length });
+
+        const response = await fetch(`${API_BASE_URL}/api/contacts/check-whatsapp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contacts: batch.map(c => ({ id: c.id, phone: c.phone })),
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          totalValid += result.valid || 0;
+          totalInvalid += result.invalid || 0;
+          
+          // Atualizar lista de contatos a cada lote
+          await loadContacts();
+        }
       }
+
+      setCheckProgress({ current: unknownContacts.length, total: unknownContacts.length });
+
+      alert(
+        `✅ Verificação concluída!\n\n` +
+          `✓ Válidos: ${totalValid}\n` +
+          `✗ Inválidos: ${totalInvalid}\n` +
+          `📊 Total: ${unknownContacts.length}`,
+      );
+      
+      await loadContacts();
     } catch (error) {
       console.error('Erro ao verificar:', error);
       alert('❌ Erro ao verificar números no WhatsApp');
     } finally {
       setIsChecking(false);
+      setCheckProgress({ current: 0, total: 0 });
     }
   };
 
@@ -388,7 +412,6 @@ const Contacts: React.FC = () => {
 
   // ============================================
   // IMPORTAR CONTATOS (CSV, XLS, XLSX)
-  // Colunas obrigatórias: nome, telefone, segmento
   // ============================================
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -466,7 +489,7 @@ const Contacts: React.FC = () => {
       // ---------- XLS / XLSX ----------
       else if (ext === 'xls' || ext === 'xlsx') {
         const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: 'array', codepage: 65001 }); // UTF-8
+        const workbook = XLSX.read(data, { type: 'array', codepage: 65001 });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const json: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
@@ -665,6 +688,31 @@ const Contacts: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Barra de Progresso da Verificação */}
+      {isChecking && checkProgress.total > 0 && (
+        <div className="fixed top-4 right-4 bg-gray-900 border border-primary rounded-lg p-4 shadow-2xl z-50 min-w-[350px]">
+          <div className="flex items-center gap-3 mb-3">
+            <Loader2 className="animate-spin text-primary" size={24} />
+            <div>
+              <div className="text-white font-bold">Verificando WhatsApp...</div>
+              <div className="text-sm text-gray-400">
+                {checkProgress.current} de {checkProgress.total} contatos
+              </div>
+            </div>
+          </div>
+          <div className="w-full bg-gray-800 rounded-full h-3">
+            <div
+              className="bg-primary h-3 rounded-full transition-all duration-300 flex items-center justify-center text-xs font-bold text-white"
+              style={{
+                width: `${(checkProgress.current / checkProgress.total) * 100}%`,
+              }}
+            >
+              {Math.round((checkProgress.current / checkProgress.total) * 100)}%
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="flex justify-between items-center">
         <div>
