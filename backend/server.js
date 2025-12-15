@@ -656,148 +656,115 @@ app.post('/api/test-zapi', async (req, res) => {
 // SEND MESSAGE VIA Z-API
 // ============================================
 
+// ============================================
+// SEND MESSAGE (TEXT OR IMAGE)
+// ============================================
 app.post('/api/send-message', async (req, res) => {
   try {
-    await connectDB();
+    const { phone, message, image, unsubscribeEnabled } = req.body;
 
-    const { phone, message } = req.body;
-
-    if (!phone || !message) {
-      return res.status(400).json({ error: 'Phone e message são obrigatórios' });
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'Phone é obrigatório' });
     }
 
-    console.log('📤 Tentando enviar mensagem para:', phone);
-    console.log('💬 Mensagem:', message);
+    if (!message && !image) {
+      return res.status(400).json({ success: false, error: 'Message ou image são obrigatórios' });
+    }
 
-    const connectedAccount = await Account.findOne({
-      zApiUrl: { $exists: true, $ne: '' }
-    }).sort({ createdAt: -1 });
+    // Buscar conta ativa
+    const activeAccount = await Account.findOne({
+      status: 'CONNECTED',
+      zApiUrl: { $exists: true, $ne: null }
+    });
 
-    let messageId = `msg_${Date.now()}`;
-    let sentViaZapi = false;
-    let zapiData = null;
+    if (!activeAccount || !activeAccount.zApiUrl) {
+      return res.status(400).json({ success: false, error: 'Nenhuma conta Z-API conectada' });
+    }
 
-    if (connectedAccount && connectedAccount.zApiUrl) {
-      try {
-        console.log('✅ Conta encontrada:', connectedAccount.name);
-        console.log('📋 URL original:', connectedAccount.zApiUrl);
+    const cleanPhone = phone.replace(/\D/g, '');
 
-        const urlPattern = /instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i;
-        const urlMatch = connectedAccount.zApiUrl.match(urlPattern);
+    // Preparar texto final (com descadastro se ativado)
+    let finalMessage = message || '';
+    if (unsubscribeEnabled) {
+      const unsubscribeText = '\n\nDigite *SAIR* para não receber mais mensagens.';
+      finalMessage += unsubscribeText;
+    }
 
-        if (!urlMatch || urlMatch.length < 3) {
-          console.error('❌ ERRO: URL Z-API inválida!');
-          throw new Error('URL Z-API mal formatada');
-        }
+    // Limpar URL da Z-API
+    let baseUrl = activeAccount.zApiUrl;
+    if (baseUrl.includes('/token/')) {
+      baseUrl = baseUrl.substring(0, baseUrl.indexOf('/token/'));
+    }
+    if (baseUrl.endsWith('/')) {
+      baseUrl = baseUrl.slice(0, -1);
+    }
 
-        const instanceId = urlMatch[1];
-        const token = urlMatch[2];
+    // Definir endpoint e body
+    let endpoint = `${baseUrl}/send-text`;
+    const body = { phone: cleanPhone };
+    const headers = { 'Content-Type': 'application/json' };
 
-        console.log('🔑 Instance ID extraído:', instanceId);
-        console.log('🔐 Token extraído:', token.substring(0, 10) + '...');
+    if (activeAccount.zApiClientToken) {
+      headers['Client-Token'] = activeAccount.zApiClientToken;
+    }
 
-        const sendUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
-        console.log('🌐 URL de envio:', sendUrl);
+    if (image) {
+      endpoint = `${baseUrl}/send-image`;
 
-        const headers = {
-          'Content-Type': 'application/json'
-        };
-
-        if (connectedAccount.zApiClientToken) {
-          headers['Client-Token'] = connectedAccount.zApiClientToken;
-          console.log('🔐 Client-Token adicionado aos headers');
-        }
-
-        const cleanPhone = phone.replace(/\D/g, '');
-        console.log('📞 Telefone limpo:', cleanPhone);
-
-        const payload = {
-          phone: cleanPhone,
-          message: message
-        };
-
-        console.log('📦 Payload:', JSON.stringify(payload));
-        console.log('📡 Enviando requisição para Z-API...');
-
-        const zapiResponse = await fetch(sendUrl, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(payload)
-        });
-
-        zapiData = await zapiResponse.json();
-
-        console.log('📨 Status da resposta:', zapiResponse.status);
-        console.log('📨 Resposta completa:', JSON.stringify(zapiData, null, 2));
-
-        if (zapiResponse.ok && (zapiData.messageId || zapiData.success)) {
-          messageId = zapiData.messageId || messageId;
-          sentViaZapi = true;
-          console.log('✅ SUCESSO! Mensagem enviada via Z-API');
-          console.log('✅ Message ID:', messageId);
-        } else {
-          console.error('❌ Resposta Z-API indicou erro:', zapiData);
-        }
-
-      } catch (zapiError) {
-        console.error('⚠️ Erro ao comunicar com Z-API:', zapiError.message);
+      // Tratamento robusto para imagem (Base64 vs URL)
+      let imageToSend = image.trim();
+      // Se não for link http/https e não tiver prefixo data:image, adiciona prefixo
+      if (!imageToSend.startsWith('http') && !imageToSend.startsWith('data:image')) {
+          imageToSend = 'data:image/jpeg;base64,' + imageToSend;
       }
+
+      body.image = imageToSend;
+
+      // Se tem imagem, o texto vai no caption
+      if (finalMessage) {
+        body.caption = finalMessage;
+      }
+
+      console.log('📷 Enviando imagem. Tamanho aprox:', imageToSend.length, 'bytes');
     } else {
-      console.warn('⚠️ Nenhuma conta Z-API configurada no banco');
+      // Apenas texto
+      body.message = finalMessage;
     }
 
-    const newMessage = new Message({
-      messageId: messageId,
-      phone: phone.replace(/\D/g, ''),
-      sender: 'agent',
-      text: message,
-      fromMe: true,
-      timestamp: new Date(),
-      accountId: connectedAccount?._id,
-      metadata: {
-        source: 'web-interface',
-        zapiResponse: zapiData,
-        accountUsed: connectedAccount?.name,
-        sentViaZapi: sentViaZapi
-      }
+    console.log('📤 Enviando via Z-API:', {
+      endpoint,
+      phone: cleanPhone,
+      hasMessage: !!finalMessage,
+      hasImage: !!image,
+      unsubscribe: !!unsubscribeEnabled
     });
 
-    await newMessage.save();
-    console.log('💾 Mensagem salva no MongoDB');
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
 
-    await Chat.findOneAndUpdate(
-      { phone: phone.replace(/\D/g, '') },
-      {
-        phone: phone.replace(/\D/g, ''),
-        lastMessage: message,
-        lastMessageAt: new Date(),
-        accountId: connectedAccount?._id
-      },
-      { upsert: true, new: true }
-    );
+    const resData = await response.json();
 
-    console.log('💾 Chat atualizado');
+    if (response.ok) {
+      const msgId = resData.messageId || resData.id || resData.zaapId;
+      console.log('✅ Mensagem enviada via Z-API:', msgId);
 
-    const response = {
-      success: true,
-      messageId: messageId,
-      sentViaZapi: sentViaZapi,
-      accountUsed: connectedAccount?.name || 'Nenhuma',
-      zapiResponse: zapiData
-    };
-
-    console.log('📤 Resposta final:', JSON.stringify(response, null, 2));
-    res.json(response);
-
+      return res.json({ success: true, messageId: msgId });
+    } else {
+      console.error('❌ Erro Z-API:', resData);
+      return res.status(500).json({ 
+        success: false, 
+        error: resData.message || resData.error || 'Erro ao enviar' 
+      });
+    }
   } catch (error) {
-    console.error('❌ ERRO CRÍTICO:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      sentViaZapi: false
-    });
+    console.error('❌ Erro ao enviar mensagem:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 // ============================================
 // WEBHOOK - Z-API
