@@ -6,27 +6,13 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// ============================================
 // CORS ATUALIZADO PARA PRODUÇÃO
-// ============================================
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:5174',
-    ];
-    
-    if (origin.endsWith('.vercel.app')) {
-      return callback(null, true);
-    }
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      return callback(null, true);
-    }
-    
+    const allowedOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174'];
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
     callback(null, true);
   },
   credentials: true,
@@ -37,14 +23,10 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ============================================
 // MONGODB CONNECTION (LAZY)
-// ============================================
 let isConnected = false;
-
 const connectDB = async () => {
   if (isConnected) return;
-  
   try {
     await mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 5000,
@@ -58,15 +40,13 @@ const connectDB = async () => {
   }
 };
 
-// ============================================
 // SCHEMAS
-// ============================================
 const contactSchema = new mongoose.Schema({
   name: { type: String, required: true },
   phone: { type: String, required: true, unique: true },
   tags: [String],
   status: { type: String, enum: ['VALID', 'INVALID', 'UNKNOWN', 'BLOCKED'], default: 'VALID' },
-  lastInteraction: Date
+  lastInteraction: Date,
 }, { timestamps: true });
 
 const accountSchema = new mongoose.Schema({
@@ -80,7 +60,7 @@ const accountSchema = new mongoose.Schema({
   zApiId: String,
   zApiToken: String,
   battery: Number,
-  avatarUrl: String
+  avatarUrl: String,
 }, { timestamps: true });
 
 const messageSchema = new mongoose.Schema({
@@ -91,7 +71,7 @@ const messageSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
   fromMe: { type: Boolean, default: false },
   accountId: mongoose.Schema.Types.ObjectId,
-  metadata: mongoose.Schema.Types.Mixed
+  metadata: mongoose.Schema.Types.Mixed,
 }, { timestamps: true });
 
 messageSchema.index({ phone: 1, timestamp: -1 });
@@ -104,16 +84,12 @@ const chatSchema = new mongoose.Schema({
   lastMessage: String,
   unreadCount: { type: Number, default: 0 },
   accountId: mongoose.Schema.Types.ObjectId,
-  lastMessageAt: { type: Date, default: Date.now }
+  lastMessageAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 
 const campaignSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  status: {
-    type: String,
-    enum: ['DRAFT', 'SCHEDULED', 'SENDING', 'COMPLETED', 'PAUSED', 'CANCELLED'],
-    default: 'DRAFT'
-  },
+  status: { type: String, enum: ['DRAFT', 'SCHEDULED', 'SENDING', 'COMPLETED', 'PAUSED', 'CANCELLED'], default: 'DRAFT' },
   message: String,
   banners: [String],
   ctaText: String,
@@ -130,7 +106,7 @@ const campaignSchema = new mongoose.Schema({
   accountId: mongoose.Schema.Types.ObjectId,
   scheduledFor: Date,
   startedAt: Date,
-  completedAt: Date
+  completedAt: Date,
 }, { timestamps: true });
 
 campaignSchema.index({ status: 1, createdAt: -1 });
@@ -141,24 +117,15 @@ const Message = mongoose.model('Message', messageSchema);
 const Chat = mongoose.model('Chat', chatSchema);
 const Campaign = mongoose.model('Campaign', campaignSchema);
 
-// ============================================
 // ROUTES - CONTACTS
-// ============================================
 app.get('/api/contacts', async (req, res) => {
   try {
     await connectDB();
     const { status, tag, search } = req.query;
     let query = {};
-    
     if (status) query.status = status;
     if (tag) query.tags = tag;
-    if (search) {
-      query.$or = [
-        { name: new RegExp(search, 'i') },
-        { phone: new RegExp(search, 'i') }
-      ];
-    }
-    
+    if (search) query.$or = [{ name: new RegExp(search, 'i') }, { phone: new RegExp(search, 'i') }];
     const contacts = await Contact.find(query).sort({ createdAt: -1 });
     res.json(contacts);
   } catch (error) {
@@ -184,7 +151,7 @@ app.post('/api/contacts', async (req, res) => {
 app.post('/api/contacts/bulk', async (req, res) => {
   try {
     await connectDB();
-    const { contacts } = req.body;
+    const contacts = req.body;
     const results = await Contact.insertMany(contacts, { ordered: false });
     res.json({ count: results.length, contacts: results });
   } catch (error) {
@@ -223,9 +190,7 @@ app.delete('/api/contacts/:id', async (req, res) => {
   }
 });
 
-// ============================================
 // ROUTES - ACCOUNTS
-// ============================================
 app.get('/api/accounts', async (req, res) => {
   try {
     await connectDB();
@@ -239,50 +204,37 @@ app.get('/api/accounts', async (req, res) => {
 app.post('/api/accounts', async (req, res) => {
   try {
     await connectDB();
-    
     const accountData = { ...req.body };
-    
+
     // EXTRAÇÃO AUTOMÁTICA DE DADOS DA URL
     if (accountData.zApiUrl && !accountData.zApiId && !accountData.zApiToken) {
       console.log('🔍 Extraindo dados da URL Z-API...');
-      console.log('📋 URL recebida:', accountData.zApiUrl);
-      
+      console.log('URL recebida:', accountData.zApiUrl);
       const urlMatch = accountData.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
-      
-      if (urlMatch && urlMatch.length >= 3) {
+      if (urlMatch && urlMatch.length === 3) {
         accountData.zApiId = urlMatch[1];
         accountData.zApiToken = urlMatch[2];
         accountData.instanceName = urlMatch[1];
-        
         console.log('✅ Instance ID extraído:', accountData.zApiId);
         console.log('✅ Token extraído:', accountData.zApiToken.substring(0, 10) + '...');
       } else {
         console.warn('⚠️ Não foi possível extrair dados da URL');
       }
     }
-    
-    if (!accountData.name) {
-      accountData.name = accountData.phoneNumber || accountData.instanceName || 'Conexão 1';
-    }
-    
-    if (!accountData.status) {
-      accountData.status = 'CONNECTED';
-    }
-    
-    if (!accountData.connectionType) {
-      accountData.connectionType = 'Z-API';
-    }
-    
+
+    if (!accountData.name) accountData.name = accountData.phoneNumber || accountData.instanceName || 'Conexão 1';
+    if (!accountData.status) accountData.status = 'CONNECTED';
+    if (!accountData.connectionType) accountData.connectionType = 'Z-API';
+
     console.log('💾 Salvando conta com dados:', {
       name: accountData.name,
       instanceName: accountData.instanceName,
       zApiId: accountData.zApiId,
       hasClientToken: !!accountData.zApiClientToken
     });
-    
+
     const account = new Account(accountData);
     await account.save();
-    
     console.log('✅ CONTA CADASTRADA COM SUCESSO:', account.name);
     res.status(201).json(account);
   } catch (error) {
@@ -317,24 +269,22 @@ app.delete('/api/accounts/:id', async (req, res) => {
   }
 });
 
-// ============================================
 // ROUTES - MESSAGES
-// ============================================
 app.get('/api/messages/:phone', async (req, res) => {
   try {
     await connectDB();
     const messages = await Message.find({ phone: req.params.phone })
       .sort({ timestamp: -1 })
       .limit(100);
-    
+
     const sanitizedMessages = messages.map(msg => ({
       ...msg.toObject(),
       text: msg.text || '',
-      messageId: msg.messageId || `msg_${Date.now()}`,
+      messageId: msg.messageId || `msg${Date.now()}`,
       sender: msg.sender || 'user',
       fromMe: msg.fromMe || false
     }));
-    
+
     res.json(sanitizedMessages);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -344,22 +294,17 @@ app.get('/api/messages/:phone', async (req, res) => {
 app.delete('/api/messages/:phone', async (req, res) => {
   try {
     await connectDB();
-    
     // Verifica se é um ObjectId (mensagem individual) ou telefone (todas as mensagens)
     if (mongoose.Types.ObjectId.isValid(req.params.phone)) {
       // É um ID de mensagem - deletar uma mensagem
       const message = await Message.findByIdAndDelete(req.params.phone);
-      
-      if (!message) {
-        return res.status(404).json({ error: 'Mensagem não encontrada' });
-      }
-      
-      console.log('✅ Mensagem excluída:', req.params.phone);
+      if (!message) return res.status(404).json({ error: 'Mensagem não encontrada' });
+      console.log('🗑️ Mensagem excluída:', req.params.phone);
       res.json({ message: 'Mensagem excluída com sucesso', deletedId: req.params.phone });
     } else {
       // É um telefone - deletar todas as mensagens
       await Message.deleteMany({ phone: req.params.phone });
-      console.log('✅ Mensagens excluídas para:', req.params.phone);
+      console.log('🗑️ Mensagens excluídas para:', req.params.phone);
       res.json({ message: 'Mensagens excluídas' });
     }
   } catch (error) {
@@ -368,9 +313,7 @@ app.delete('/api/messages/:phone', async (req, res) => {
   }
 });
 
-// ============================================
 // ROUTES - CHATS
-// ============================================
 app.get('/api/chats', async (req, res) => {
   try {
     await connectDB();
@@ -387,16 +330,10 @@ app.get('/api/chats', async (req, res) => {
 app.delete('/api/chats/:phone', async (req, res) => {
   try {
     await connectDB();
-    
     const phone = req.params.phone.replace(/\D/g, '');
-    
-    // Deletar chat
+    console.log('🗑️ Deletar chat:', phone);
     const chat = await Chat.findOneAndDelete({ phone });
-    
-    if (!chat) {
-      return res.status(404).json({ error: 'Chat não encontrado' });
-    }
-    
+    if (!chat) return res.status(404).json({ error: 'Chat não encontrado' });
     console.log('✅ Chat excluído:', phone);
     res.json({ message: 'Chat excluído com sucesso', phone });
   } catch (error) {
@@ -405,9 +342,7 @@ app.delete('/api/chats/:phone', async (req, res) => {
   }
 });
 
-// ============================================
 // ROUTES - CAMPAIGNS
-// ============================================
 app.get('/api/campaigns', async (req, res) => {
   try {
     await connectDB();
@@ -446,39 +381,30 @@ app.put('/api/campaigns/:id', async (req, res) => {
   }
 });
 
-// ============================================
 // ROTA DE DEBUG - TESTE Z-API
-// ============================================
 app.post('/api/test-zapi', async (req, res) => {
   try {
     await connectDB();
-    
     const { phone, message } = req.body;
-    
-    console.log('🔍 DEBUG - Buscando conta...');
-    
-    const account = await Account.findOne({ 
-      zApiUrl: { $exists: true, $ne: '' }
-    }).sort({ createdAt: -1 });
-    
+
+    console.log('🐞 DEBUG - Buscando conta...');
+    const account = await Account.findOne({ zApiUrl: { $exists: true, $ne: '' } }).sort({ createdAt: -1 });
     const totalAccounts = await Account.countDocuments();
-    
-    console.log(`📊 Total de contas no banco: ${totalAccounts}`);
-    
+    console.log('📊 Total de contas no banco:', totalAccounts);
+
     if (!account) {
       console.log('❌ Nenhuma conta encontrada com zApiUrl');
-      return res.json({ 
+      return res.json({
         error: 'Nenhuma conta encontrada',
         totalAccounts: totalAccounts,
         debug: 'Nenhuma conta tem zApiUrl configurado'
       });
     }
-    
+
     console.log('✅ Conta encontrada:', account.name);
-    console.log('📋 URL:', account.zApiUrl);
-    
+    console.log('🔗 URL:', account.zApiUrl);
+
     const instanceMatch = account.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
-    
     if (!instanceMatch) {
       console.log('❌ URL mal formatada');
       return res.json({
@@ -488,31 +414,30 @@ app.post('/api/test-zapi', async (req, res) => {
         totalAccounts
       });
     }
-    
+
     const [, instanceId, token] = instanceMatch;
     const sendUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
-    
+
     console.log('🔑 Instance:', instanceId);
-    console.log('🔐 Token:', token.substring(0, 10) + '...');
+    console.log('🔑 Token:', token.substring(0, 10) + '...');
     console.log('🌐 Send URL:', sendUrl);
-    
+
     const response = await fetch(sendUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Client-Token': account.zApiClientToken || ''
+        'Client-Token': account.zApiClientToken
       },
       body: JSON.stringify({
         phone: phone.replace(/\D/g, ''),
         message: message || 'Teste debug'
       })
     });
-    
+
     const data = await response.json();
-    
-    console.log('📨 Status HTTP:', response.status);
-    console.log('📨 Resposta Z-API:', data);
-    
+    console.log('📡 Status HTTP:', response.status);
+    console.log('📡 Resposta Z-API:', data);
+
     res.json({
       success: true,
       accountFound: account.name,
@@ -524,171 +449,142 @@ app.post('/api/test-zapi', async (req, res) => {
       zapiResponse: data,
       sentSuccess: response.ok && data.messageId ? true : false
     });
-    
   } catch (error) {
     console.error('❌ Erro no debug:', error);
     res.json({ error: error.message, stack: error.stack });
   }
 });
 
-// ============================================
-// SEND MESSAGE VIA Z-API
-// ============================================
+// ===== SEND MESSAGE VIA Z-API - VERSÃO CORRIGIDA =====
 app.post('/api/send-message', async (req, res) => {
   try {
     await connectDB();
-    const { phone, message } = req.body;
-    
-    if (!phone || !message) {
-      return res.status(400).json({ error: 'Phone e message são obrigatórios' });
+    const { phone, message, image } = req.body;
+
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'Phone é obrigatório' });
     }
-    
-    console.log('📤 Tentando enviar mensagem para:', phone);
-    console.log('💬 Mensagem:', message);
-    
-    const connectedAccount = await Account.findOne({
-      zApiUrl: { $exists: true, $ne: '' }
-    }).sort({ createdAt: -1 });
-    
-    let messageId = `msg_${Date.now()}`;
-    let sentViaZapi = false;
-    let zapiData = null;
-    
-    if (connectedAccount && connectedAccount.zApiUrl) {
-      try {
-        console.log('✅ Conta encontrada:', connectedAccount.name);
-        console.log('📋 URL original:', connectedAccount.zApiUrl);
-        
-        const urlPattern = /instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i;
-        const urlMatch = connectedAccount.zApiUrl.match(urlPattern);
-        
-        if (!urlMatch || urlMatch.length < 3) {
-          console.error('❌ ERRO: URL Z-API inválida!');
-          throw new Error('URL Z-API mal formatada');
-        }
-        
-        const instanceId = urlMatch[1];
-        const token = urlMatch[2];
-        
-        console.log('🔑 Instance ID extraído:', instanceId);
-        console.log('🔐 Token extraído:', token.substring(0, 10) + '...');
-        
-        const sendUrl = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
-        console.log('🌐 URL de envio:', sendUrl);
-        
-        const headers = {
-          'Content-Type': 'application/json'
-        };
-        
-        if (connectedAccount.zApiClientToken) {
-          headers['Client-Token'] = connectedAccount.zApiClientToken;
-          console.log('🔐 Client-Token adicionado aos headers');
-        }
-        
-        const cleanPhone = phone.replace(/\D/g, '');
-        console.log('📞 Telefone limpo:', cleanPhone);
-        
-        const payload = {
-          phone: cleanPhone,
-          message: message
-        };
-        
-        console.log('📦 Payload:', JSON.stringify(payload));
-        console.log('📡 Enviando requisição para Z-API...');
-        
-        const zapiResponse = await fetch(sendUrl, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(payload)
-        });
-        
-        zapiData = await zapiResponse.json();
-        
-        console.log('📨 Status da resposta:', zapiResponse.status);
-        console.log('📨 Resposta completa:', JSON.stringify(zapiData, null, 2));
-        
-        if (zapiResponse.ok && (zapiData.messageId || zapiData.success)) {
-          messageId = zapiData.messageId || messageId;
-          sentViaZapi = true;
-          console.log('✅ SUCESSO! Mensagem enviada via Z-API');
-          console.log('✅ Message ID:', messageId);
-        } else {
-          console.error('❌ Resposta Z-API indicou erro:', zapiData);
-        }
-        
-      } catch (zapiError) {
-        console.error('⚠️ Erro ao comunicar com Z-API:', zapiError.message);
-      }
-    } else {
-      console.warn('⚠️ Nenhuma conta Z-API configurada no banco');
+
+    if (!message && !image) {
+      return res.status(400).json({ success: false, error: 'Message ou image são obrigatórios' });
     }
-    
-    const newMessage = new Message({
-      messageId: messageId,
-      phone: phone.replace(/\D/g, ''),
-      sender: 'agent',
-      text: message,
-      fromMe: true,
-      timestamp: new Date(),
-      accountId: connectedAccount?._id,
-      metadata: {
-        source: 'web-interface',
-        zapiResponse: zapiData,
-        accountUsed: connectedAccount?.name,
-        sentViaZapi: sentViaZapi
-      }
+
+    const activeAccount = await Account.findOne({ 
+      status: 'CONNECTED',
+      zApiUrl: { $exists: true, $ne: null }
     });
+
+    if (!activeAccount || !activeAccount.zApiUrl) {
+      return res.status(400).json({ success: false, error: 'Nenhuma conta Z-API conectada' });
+    }
+
+    const cleanPhone = phone.replace(/\D/g, '');
+
+    // Extrair instanceId e token da URL
+    const urlMatch = activeAccount.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
+    if (!urlMatch || urlMatch.length !== 3) {
+      console.error('❌ URL Z-API mal formatada:', activeAccount.zApiUrl);
+      return res.status(400).json({ success: false, error: 'URL da Z-API inválida' });
+    }
+
+    const [, instanceId, token] = urlMatch;
     
-    await newMessage.save();
-    console.log('💾 Mensagem salva no MongoDB');
-    
-    await Chat.findOneAndUpdate(
-      { phone: phone.replace(/\D/g, '') },
-      {
-        phone: phone.replace(/\D/g, ''),
-        lastMessage: message,
-        lastMessageAt: new Date(),
-        accountId: connectedAccount?._id
-      },
-      { upsert: true, new: true }
-    );
-    
-    console.log('💾 Chat atualizado');
-    
-    const response = {
-      success: true,
-      messageId: messageId,
-      sentViaZapi: sentViaZapi,
-      accountUsed: connectedAccount?.name || 'Nenhuma',
-      zapiResponse: zapiData
+    let endpoint, body;
+    const headers = {
+      'Content-Type': 'application/json'
     };
-    
-    console.log('📤 Resposta final:', JSON.stringify(response, null, 2));
-    
-    res.json(response);
-    
-  } catch (error) {
-    console.error('❌ ERRO CRÍTICO:', error.message);
-    res.status(500).json({ 
-      success: false,
-      error: error.message,
-      sentViaZapi: false
+
+    if (activeAccount.zApiClientToken) {
+      headers['Client-Token'] = activeAccount.zApiClientToken;
+    }
+
+    // Se tem imagem, usar endpoint de imagem
+    if (image) {
+      endpoint = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-image`;
+      
+      // Garantir que a imagem tem o prefixo data:image
+      let imageToSend = image.trim();
+      if (!imageToSend.startsWith('data:image')) {
+        imageToSend = `data:image/jpeg;base64,${imageToSend}`;
+      }
+
+      body = {
+        phone: cleanPhone,
+        image: imageToSend
+      };
+
+      // Se tem mensagem junto com imagem, usar caption
+      if (message) {
+        body.caption = message;
+      }
+
+      console.log('📸 Enviando imagem via Z-API');
+      console.log('📏 Tamanho da imagem:', imageToSend.length, 'bytes');
+    } else {
+      // Apenas texto
+      endpoint = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
+      body = {
+        phone: cleanPhone,
+        message: message
+      };
+      console.log('📝 Enviando texto via Z-API');
+    }
+
+    console.log('🌐 Endpoint:', endpoint);
+    console.log('📞 Phone:', cleanPhone);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
     });
+
+    const resData = await response.json();
+
+    if (response.ok) {
+      const msgId = resData.messageId || resData.id || resData.zaapId;
+      console.log('✅ Mensagem enviada via Z-API:', msgId);
+
+      // Salvar no MongoDB
+      const newMessage = new Message({
+        messageId: msgId,
+        phone: cleanPhone,
+        sender: 'agent',
+        text: message || (image ? '[Imagem enviada]' : ''),
+        fromMe: true,
+        timestamp: new Date(),
+        accountId: activeAccount._id,
+        metadata: {
+          hasImage: !!image,
+          zapiResponse: resData
+        }
+      });
+
+      await newMessage.save();
+
+      return res.json({ success: true, messageId: msgId });
+    }
+
+    console.error('❌ Erro Z-API:', resData);
+    return res.status(500).json({ 
+      success: false, 
+      error: resData.message || resData.error || 'Erro ao enviar' 
+    });
+  } catch (error) {
+    console.error('❌ Erro ao enviar mensagem:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ============================================
 // WEBHOOK - Z-API
-// ============================================
 app.post('/webhook', async (req, res) => {
   try {
     await connectDB();
-    console.log('📨 Webhook recebido:', JSON.stringify(req.body, null, 2));
-    
+    console.log('🎣 Webhook recebido:', JSON.stringify(req.body, null, 2));
+
     const { phone, text, fromMe, messageId, message, senderName, pushName, notifyName } = req.body;
-    
-    let messageText = '';
-    
+
+    let messageText;
     if (typeof text === 'string') {
       messageText = text;
     } else if (typeof text === 'object' && text !== null) {
@@ -701,7 +597,7 @@ app.post('/webhook', async (req, res) => {
       else if (message.message) messageText = message.message;
       else if (message.conversation) messageText = message.conversation;
     }
-    
+
     if (!messageText && req.body.data && req.body.data.message) {
       if (typeof req.body.data.message === 'string') {
         messageText = req.body.data.message;
@@ -709,17 +605,17 @@ app.post('/webhook', async (req, res) => {
         messageText = req.body.data.message.text;
       }
     }
-    
+
     if (phone && messageText) {
       const normalizedPhone = phone.replace(/\D/g, '');
-      const contactName = senderName || pushName || notifyName ||
-        req.body.data?.senderName ||
-        req.body.data?.pushName ||
-        req.body.data?.notifyName ||
-        normalizedPhone;
-      
+      const contactName = senderName || pushName || notifyName || 
+                          req.body.data?.senderName || 
+                          req.body.data?.pushName || 
+                          req.body.data?.notifyName || 
+                          normalizedPhone;
+
       const newMessage = new Message({
-        messageId: messageId || `msg_${Date.now()}`,
+        messageId: messageId || `msg${Date.now()}`,
         phone: normalizedPhone,
         sender: fromMe ? 'agent' : 'user',
         text: messageText,
@@ -727,9 +623,9 @@ app.post('/webhook', async (req, res) => {
         timestamp: new Date(),
         metadata: req.body
       });
-      
+
       await newMessage.save();
-      
+
       await Chat.findOneAndUpdate(
         { phone: normalizedPhone },
         {
@@ -741,12 +637,12 @@ app.post('/webhook', async (req, res) => {
         },
         { upsert: true, new: true }
       );
-      
+
       console.log('✅ Mensagem salva:', normalizedPhone, '-', messageText);
     } else {
       console.log('⚠️ Webhook sem phone ou text válido');
     }
-    
+
     res.status(200).json({ success: true });
   } catch (error) {
     console.error('❌ Erro no webhook:', error);
@@ -754,125 +650,10 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// ============================================
-// ROUTE - SEND MESSAGE (Z-API) - OTIMIZADO
-// ============================================
-app.post('/api/send-message', async (req, res) => {
-  try {
-    const { phone, message, image } = req.body;
-    
-    if (!phone) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Phone é obrigatório' 
-      });
-    }
-    
-    if (!message && !image) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Message ou image são obrigatórios' 
-      });
-    }
-    
-    const activeAccount = await Account.findOne({ 
-      status: 'CONNECTED',
-      zApiUrl: { $exists: true, $ne: null }
-    });
-    
-    if (!activeAccount || !activeAccount.zApiUrl) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Nenhuma conta Z-API conectada' 
-      });
-    }
-    
-    const cleanPhone = phone.replace(/\D/g, '');
-    
-    // Limpar URL da Z-API
-    let baseUrl = activeAccount.zApiUrl;
-    if (baseUrl.includes('/token/')) {
-      baseUrl = baseUrl.substring(0, baseUrl.indexOf('/token/'));
-    }
-    if (baseUrl.endsWith('/')) {
-      baseUrl = baseUrl.slice(0, -1);
-    }
-    
-    let endpoint = `${baseUrl}/send-text`;
-    const body = { phone: cleanPhone };
-    
-    if (image) {
-      endpoint = `${baseUrl}/send-image`;
-      
-      // ✅ GARANTIR que tem prefixo data:image
-      let imageToSend = image.trim();
-      if (!imageToSend.startsWith('data:image')) {
-        imageToSend = 'data:image/jpeg;base64,' + imageToSend;
-      }
-      
-      body.image = imageToSend;
-      
-      if (message) {
-        body.caption = message;
-      }
-      
-      console.log('📷 Tamanho da imagem:', imageToSend.length, 'bytes');
-    } else {
-      body.message = message;
-    }
-    
-    const headers = { 'Content-Type': 'application/json' };
-    if (activeAccount.zApiClientToken) {
-      headers['Client-Token'] = activeAccount.zApiClientToken;
-    }
-    
-    console.log('📤 Enviando via Z-API:', {
-      endpoint,
-      phone: cleanPhone,
-      hasMessage: !!message,
-      hasImage: !!image
-    });
-    
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    });
-    
-    const resData = await response.json();
-    
-    if (response.ok) {
-      const msgId = resData.messageId || resData.id || resData.zaapId;
-      console.log('✅ Mensagem enviada via Z-API:', msgId);
-      
-      return res.json({
-        success: true,
-        messageId: msgId
-      });
-    }
-    
-    console.error('❌ Erro Z-API:', resData);
-    return res.status(500).json({
-      success: false,
-      error: resData.message || resData.error || 'Erro ao enviar'
-    });
-    
-  } catch (error) {
-    console.error('❌ Erro ao enviar mensagem:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// ============================================
 // STATS
-// ============================================
 app.get('/api/stats', async (req, res) => {
   try {
     await connectDB();
-    
     const [totalContacts, blockedContacts, validContacts, onlineAccounts, totalMessages, activeCampaigns] = await Promise.all([
       Contact.countDocuments(),
       Contact.countDocuments({ status: 'BLOCKED' }),
@@ -881,7 +662,7 @@ app.get('/api/stats', async (req, res) => {
       Message.countDocuments(),
       Campaign.countDocuments({ status: { $in: ['SCHEDULED', 'SENDING'] } })
     ]);
-    
+
     res.json({
       totalContacts,
       blockedContacts,
@@ -895,18 +676,13 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// ============================================
 // HEALTH CHECK
-// ============================================
 app.get('/health', async (req, res) => {
   try {
     await connectDB();
     const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
-    
-    const connectedAccount = await Account.findOne({
-      zApiUrl: { $exists: true, $ne: '' }
-    }).sort({ createdAt: -1 });
-    
+    const connectedAccount = await Account.findOne({ zApiUrl: { $exists: true, $ne: '' } }).sort({ createdAt: -1 });
+
     res.json({
       status: 'OK',
       mongodb: dbStatus,
@@ -920,9 +696,7 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// ============================================
 // ROOT
-// ============================================
 app.get('/', (req, res) => {
   res.json({
     status: 'Ready',
@@ -944,16 +718,14 @@ app.get('/', (req, res) => {
   });
 });
 
-// ============================================
 // START SERVER
-// ============================================
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
-    console.log(`\n🚀 ZapMaster Pro Backend`);
-    console.log(`📂 Servidor: http://localhost:${PORT}`);
-    console.log(`🔗 Webhook: http://localhost:${PORT}/webhook`);
+    console.log('🚀 ZapMaster Pro Backend');
+    console.log(`📡 Servidor: http://localhost:${PORT}`);
+    console.log(`🎣 Webhook: http://localhost:${PORT}/webhook`);
     console.log(`💚 Health: http://localhost:${PORT}/health`);
-    console.log(`📊 Stats: http://localhost:${PORT}/api/stats\n`);
+    console.log(`📊 Stats: http://localhost:${PORT}/api/stats`);
   });
 }
 
