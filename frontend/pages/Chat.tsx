@@ -260,9 +260,9 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="h-screen flex bg-gray-900 text-gray-200"> {/* Cor de fundo principal ajustada */}
+    <div className="h-screen flex bg-gray-900 text-gray-200">
       {/* Lista de Chats */}
-      <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col"> {/* Fundo da lista de chats ajustado */}
+      <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
         <div className="p-4 border-b border-gray-700">
           <h2 className="text-xl font-semibold text-white">Conversas</h2>
         </div>
@@ -287,7 +287,7 @@ export default function ChatPage() {
                     <p className="font-medium text-white">
                       {chat.contactName || chat.phone}
                     </p>
-                    <p className="text-sm text-gray-400 truncate">{chat.lastMessage}</p> {/* Cor do texto ajustada */}
+                    <p className="text-sm text-gray-400 truncate">{chat.lastMessage}</p>
                   </div>
                   {chat.unreadCount > 0 && (
                     <span className="bg-green-500 text-white text-xs rounded-full px-2 py-1">
@@ -355,7 +355,7 @@ export default function ChatPage() {
                       className={`max-w-md px-4 py-2 rounded-2xl ${
                         msg.fromMe
                           ? 'bg-green-500 text-white rounded-br-none'
-                          : 'bg-gray-800 text-white rounded-bl-none shadow' // Fundo da mensagem de usuário ajustado
+                          : 'bg-gray-800 text-white rounded-bl-none shadow'
                       }`}
                     >
                       <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
@@ -384,7 +384,7 @@ export default function ChatPage() {
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
                   placeholder="Digite uma mensagem..."
-                  className="flex-1 px-4 py-2 border border-gray-600 bg-gray-700 text-white rounded-full focus:outline-none focus:ring-2 focus:ring-green-500" // Input corrigido para fundo escuro e texto branco
+                  className="flex-1 px-4 py-2 border border-gray-600 bg-gray-700 text-white rounded-full focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
                 <button
                   type="submit"
@@ -407,8 +407,8 @@ export default function ChatPage() {
       </div>
 
       {/* ============================================ */}
-      {/* MODAL DE ENCAMINHAR MENSAGEM */}
-      {============================================*/}
+      {/* MODAL DE ENCAMINHAR MENSAGEM - CORRIGIDO O BLOCO DE COMENTÁRIO */}
+      {/* ============================================ */}
       {showForwardModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[80vh] flex flex-col">
@@ -453,7 +453,7 @@ export default function ChatPage() {
                     className={`p-3 rounded-lg cursor-pointer transition mb-1 flex items-center justify-between ${
                       selectedForwardContacts.includes(contact.phone)
                         ? 'bg-green-500/30 border-2 border-green-500'
-                        : 'bg-gray-800 hover:bg-gray-700' // Fundo do item de contato ajustado
+                        : 'bg-gray-800 hover:bg-gray-700'
                     }`}
                   >
                     <div>
