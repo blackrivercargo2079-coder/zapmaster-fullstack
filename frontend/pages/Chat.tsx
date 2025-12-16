@@ -389,7 +389,7 @@ export default function ChatPage() {
                 <button
                   type="submit"
                   disabled={!messageInput.trim()}
-                  className="bg-green-500 text-white p-3 rounded-full hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  className="bg-slate-700 text-white p-3 rounded-full hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
                 >
                   <Send size={20} />
                 </button>
