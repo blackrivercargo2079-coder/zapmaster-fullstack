@@ -653,10 +653,6 @@ app.post('/api/test-zapi', async (req, res) => {
 });
 
 // ============================================
-// SEND MESSAGE VIA Z-API
-// ============================================
-
-// ============================================
 // SEND MESSAGE (TEXT OR IMAGE)
 // ============================================
 app.post('/api/send-message', async (req, res) => {
@@ -683,14 +679,18 @@ app.post('/api/send-message', async (req, res) => {
 
     const cleanPhone = phone.replace(/\D/g, '');
 
-    // Preparar texto final (com descadastro se ativado)
+    // Preparar texto final (o frontend agora controla a inclusão do descadastro)
     let finalMessage = message || '';
-    if (unsubscribeEnabled) {
-      const unsubscribeText = '\n\nDigite *SAIR* para não receber mais mensagens.';
-      finalMessage += unsubscribeText;
-    }
+    
+    // ❌ BLOCO REMOVIDO: A lógica de inclusão da mensagem de descadastro foi movida
+    // para o frontend (Campaigns.tsx) para garantir a ordem correta no fluxo de envio.
+    
+    // if (unsubscribeEnabled) {
+    //   const unsubscribeText = '\n\nDigite *SAIR* para não receber mais mensagens.';
+    //   finalMessage += unsubscribeText;
+    // }
 
-        // ✅ CORREÇÃO: Extrair instanceId e token da URL corretamente
+    // ✅ CORREÇÃO: Extrair instanceId e token da URL corretamente
     const urlMatch = activeAccount.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
 
     if (!urlMatch || urlMatch.length < 3) {

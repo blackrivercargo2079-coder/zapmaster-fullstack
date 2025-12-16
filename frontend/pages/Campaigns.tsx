@@ -263,7 +263,7 @@ const Campaigns: React.FC = () => {
   };
 
   const handleStartCampaign = async () => {
-    console.log('--- Iniciando Disparo: Texto -> Imagens -> Descadastre ---');
+    console.log('--- Iniciando Disparo: CTA -> Imagens -> Descadastre ---');
     setCriticalError(null);
 
     const canSendCheck = campaignControl.canSend();
@@ -272,8 +272,8 @@ const Campaigns: React.FC = () => {
       return;
     }
 
-    if (!message && banners.length === 0) {
-      alert('Digite uma mensagem ou adicione banners.');
+    if (!message && banners.length === 0 && !ctaText) {
+      alert('A campanha deve ter uma mensagem, CTA ou banners.');
       return;
     }
 
@@ -332,73 +332,128 @@ const Campaigns: React.FC = () => {
     setCampaignStatus('SENDING');
     setProgress({ sent: 0, failed: 0, total: targetContacts.length });
 
+    const delayBetweenSteps = 1500; // 1.5s entre etapas (CTA, Imagem, Descadastro)
+
     for (let i = 0; i < targetContacts.length; i++) {
       const contact = targetContacts[i];
       setCurrentContactName(contact.name);
 
-      let mainMessage = message;
-      if (ctaText && ctaLink) {
-        mainMessage += `\n\n${ctaText}: ${ctaLink}`;
-      }
-
-      const footerMessage = `Caso não queira receber mais mensagens, responda Sair.`;
-      console.log(`Enviando ${i + 1}/${targetContacts.length} para ${contact.phone}...`);
-
       let contactSuccess = true;
       let contactError: string | null = null;
+      
+      // 1. CONSTRUÇÃO DA MENSAGEM DO TOPO (Texto Principal + CTA)
+      let topMessage = message || '';
+      if (ctaText && ctaLink) {
+          // Adiciona o CTA logo após a mensagem principal (topo)
+          topMessage += `\n\n${ctaText}: ${ctaLink}`;
+      }
+
+      // 2. CONSTRUÇÃO DA MENSAGEM DO FOOTER (Descadastro)
+      const footerMessage = unsubscribe ? 
+          'Digite *SAIR* para não receber mais mensagens.' : ''; 
+      
+      console.log(`Enviando ${i + 1}/${targetContacts.length} para ${contact.phone}...`);
 
       try {
-        // ETAPA 1: Texto
-        if (mainMessage.trim()) {
-          const textResult = await apiService.sendMessage(connectedAccount, contact.phone, mainMessage);
-          if (!textResult.success) {
-            contactSuccess = false;
-            contactError = textResult.error || 'Erro desconhecido';
+          // ==========================================================
+          // ETAPA 1: Envio da Mensagem do TOPO (Texto Puro com CTA)
+          // ==========================================================
+          if (topMessage.trim()) {
+              console.log('📤 Enviando Etapa 1: Texto/CTA');
+              
+              // apiService.sendMessage já chama o backend /api/send-message
+              const textResult = await apiService.sendMessage(
+                  connectedAccount, 
+                  contact.phone, 
+                  topMessage, // ✅ Texto + CTA (sem descadastro)
+                  '' // Imagem vazia
+              );
+              if (!textResult.success) {
+                  contactSuccess = false;
+                  contactError = textResult.error || 'Erro ao enviar CTA/Texto';
+              }
+              // Pausa se houver mais etapas
+              if (contactSuccess && (banners.length > 0 || footerMessage.trim())) {
+                  await new Promise(resolve => setTimeout(resolve, delayBetweenSteps));
+              }
           }
-          if (contactSuccess && banners.length > 0 && mainMessage.trim()) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          if (!contactSuccess) {
+              // Se houve falha no CTA, não continua
+              throw new Error(contactError || 'Falha na Etapa 1'); 
           }
-        }
 
-        // ETAPA 2: Imagens
-        if (contactSuccess && banners.length > 0) {
-          for (const banner of banners) {
-            const imgResult = await apiService.sendMessage(connectedAccount, contact.phone, '', banner);
-            if (!imgResult.success) {
-              contactSuccess = false;
-              contactError = imgResult.error || 'Erro ao enviar imagem';
-              break;
-            }
-            if (banners.length > 1) {
+          // ==========================================================
+          // ETAPA 2: Envio das Imagens (Banners)
+          // ==========================================================
+          if (banners.length > 0) {
+              console.log(`📤 Enviando Etapa 2: ${banners.length} Banner(s)`);
+              for (let j = 0; j < banners.length; j++) {
+                  const banner = banners[j];
+                  
+                  // Imagens enviadas SEM legenda/caption (o backend /api/send-message ignora o message se image existir)
+                  const imgResult = await apiService.sendMessage(
+                      connectedAccount, 
+                      contact.phone, 
+                      '', // ✅ Legenda vazia
+                      banner // ✅ Imagem
+                  );
+                  
+                  if (!imgResult.success) {
+                      contactSuccess = false;
+                      contactError = imgResult.error || 'Erro ao enviar imagem';
+                      break;
+                  }
+                  // Pausa entre imagens
+                  if (banners.length > 1 && j < banners.length - 1) {
+                      await new Promise(resolve => setTimeout(resolve, 1000)); 
+                  }
+              }
+
+              // Pausa se houver mais etapas
+              if (contactSuccess && footerMessage.trim()) {
+                  await new Promise(resolve => setTimeout(resolve, delayBetweenSteps));
+              }
+          }
+          
+          if (!contactSuccess) {
+              // Se houve falha nas Imagens, não continua
+              throw new Error(contactError || 'Falha na Etapa 2');
+          }
+
+
+          // ==========================================================
+          // ETAPA 3: Envio da Mensagem de FOOTER (Descadastro)
+          // ==========================================================
+          if (footerMessage.trim()) {
+              console.log('📤 Enviando Etapa 3: Descadastro');
+              // Envia APENAS a mensagem de descadastro como uma mensagem de texto final
+              const footerResult = await apiService.sendMessage(
+                  connectedAccount, 
+                  contact.phone, 
+                  footerMessage,
+                  '' // Imagem vazia
+              ); 
+              if (!footerResult.success) {
+                  // É um aviso, mas registramos o envio como sucesso do contato
+                  console.warn('Falha ao enviar footer de descadastre:', footerResult.error); 
+              }
               await new Promise(resolve => setTimeout(resolve, 1000));
-            }
           }
-        }
+          
+          // Se chegou aqui, o contato foi um sucesso
+          setProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
+          const newStats = campaignControl.incrementSent();
+          setStats(newStats);
+          setMessagesSinceLastPause(prev => prev + 1);
 
-        // ETAPA 3: Descadastre
-        if (contactSuccess && unsubscribe) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const footerResult = await apiService.sendMessage(connectedAccount, contact.phone, footerMessage);
-          if (!footerResult.success) {
-            console.warn('Falha ao enviar footer de descadastre:', footerResult.error);
-          }
-        }
       } catch (err: any) {
         console.error('Erro crítico no loop:', err);
         contactSuccess = false;
         contactError = err.message;
-      }
-
-      if (contactSuccess) {
-        setProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
-        const newStats = campaignControl.incrementSent();
-        setStats(newStats);
-        setMessagesSinceLastPause(prev => prev + 1);
-      } else {
         setProgress(prev => ({ ...prev, failed: prev.failed + 1 }));
-        const newStats = campaignControl.incrementFailed();
-        setStats(newStats);
         
+        // Tratar erro crítico
         if (contactError?.includes('client-token is not configured')) {
           setCriticalError('ERRO CRÍTICO: Sua Z-API exige um Client-Token. Vá na aba Conexões e preencha.');
           setCampaignStatus('PAUSED');
@@ -406,6 +461,7 @@ const Campaigns: React.FC = () => {
         }
       }
 
+      // ... (Lógica de Pausa Automática)
       const canContinue = campaignControl.canSend();
       if (!canContinue.allowed) {
         alert(`Campanha pausada!\n${canContinue.reason}\n\n${progress.sent + 1} enviadas de ${targetContacts.length} (${i + 1} processadas)`);
@@ -437,6 +493,8 @@ const Campaigns: React.FC = () => {
         await new Promise(resolve => setTimeout(resolve, pauseDuration));
         setMessagesSinceLastPause(0);
       }
+      // ... (Fim da Lógica de Pausa Automática)
+
 
       if (i < targetContacts.length - 1) {
         const delay = getDelay();
@@ -764,7 +822,7 @@ const Campaigns: React.FC = () => {
                 </label>
               )}
             </div>
-            <p className="text-[10px] text-gray-500 mt-2">Ordem: Texto {'>'} Imagens {'>'} Descadastre.</p>
+            <p className="text-[10px] text-gray-500 mt-2">Ordem: CTA {'>'} Imagens {'>'} Descadastre.</p>
           </div>
 
           {/* 3. Message Content + AI */}
@@ -835,7 +893,7 @@ const Campaigns: React.FC = () => {
               <div className="flex items-center justify-between bg-gray-800/50 p-3 rounded-lg">
                 <div className="flex flex-col">
                   <span className="text-white text-sm font-medium">Opção de Descadastre</span>
-                  <span className="text-xs text-gray-500">Enviar "Caso não queira receber mais mensagens, responda Sair." no final.</span>
+                  <span className="text-xs text-gray-500">Enviar "Digite *SAIR* para não receber mais mensagens." no final.</span>
                 </div>
                 <button
                   onClick={() => setUnsubscribe(!unsubscribe)}
@@ -929,20 +987,23 @@ const Campaigns: React.FC = () => {
                   opacity: 0.9
                 }}
               >
-                {/* 1. Text Bubble (Top) */}
-                <div className="bg-[#202c33] rounded-lg p-2 max-w-[90%] ml-auto mr-0 shadow-sm mb-2">
-                  <p className="text-white text-sm whitespace-pre-wrap">
-                    {message || 'Sua mensagem aparecerá aqui...'}
-                  </p>
-                  {ctaText && (
-                    <div className="mt-2 pt-2 border-t border-gray-600">
-                      <button className="w-full bg-[#2a3942] text-[#3b82f6] text-xs font-medium py-1.5 px-3 rounded flex items-center justify-center space-x-1 hover:bg-[#32424d]">
-                        <Link size={12} />
-                        <span>{ctaText}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
+                {/* 1. Text Bubble (Top) - CTA */}
+                {(message || ctaText) && (
+                  <div className="bg-[#202c33] rounded-lg p-2 max-w-[90%] ml-auto mr-0 shadow-sm mb-2">
+                    <p className="text-white text-sm whitespace-pre-wrap">
+                      {message || 'Teste de envio'}
+                    </p>
+                    {ctaText && (
+                      <div className="mt-2 pt-2 border-t border-gray-600">
+                        <button className="w-full bg-[#2a3942] text-[#3b82f6] text-xs font-medium py-1.5 px-3 rounded flex items-center justify-center space-x-1 hover:bg-[#32424d]">
+                          <Link size={12} />
+                          <span>{ctaText}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
 
                 {/* 2. Image Bubbles (Middle) */}
                 {banners.length > 0 && (
