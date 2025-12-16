@@ -690,16 +690,20 @@ app.post('/api/send-message', async (req, res) => {
       finalMessage += unsubscribeText;
     }
 
-    // Limpar URL da Z-API
-    let baseUrl = activeAccount.zApiUrl;
-    if (baseUrl.includes('/token/')) {
-      baseUrl = baseUrl.substring(0, baseUrl.indexOf('/token/'));
-    }
-    if (baseUrl.endsWith('/')) {
-      baseUrl = baseUrl.slice(0, -1);
+        // ✅ CORREÇÃO: Extrair instanceId e token da URL corretamente
+    const urlMatch = activeAccount.zApiUrl.match(/instances\/([A-Z0-9]+)\/token\/([A-Z0-9]+)/i);
+
+    if (!urlMatch || urlMatch.length < 3) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'URL da Z-API está mal formatada. Configure novamente a conta.' 
+      });
     }
 
-    let endpoint = `${baseUrl}/send-text`;
+    const [, instanceId, token] = urlMatch;
+
+    // ✅ Montar endpoint completo com instanceId e token
+    let endpoint;
     const body = { phone: cleanPhone };
     const headers = { 'Content-Type': 'application/json' };
 
@@ -708,21 +712,21 @@ app.post('/api/send-message', async (req, res) => {
     }
 
     if (image) {
-      endpoint = `${baseUrl}/send-image`;
+      endpoint = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-image`;
 
       let imageToSend = image.trim();
       if (!imageToSend.startsWith('http') && !imageToSend.startsWith('data:image')) {
-          imageToSend = 'data:image/jpeg;base64,' + imageToSend;
+        imageToSend = 'data:image/jpeg;base64,' + imageToSend;
       }
 
       body.image = imageToSend;
-
       if (finalMessage) {
         body.caption = finalMessage;
       }
 
       console.log('📷 Enviando imagem. Tamanho aprox:', imageToSend.length, 'bytes');
     } else {
+      endpoint = `https://api.z-api.io/instances/${instanceId}/token/${token}/send-text`;
       body.message = finalMessage;
     }
 
@@ -908,114 +912,6 @@ app.post('/webhook', async (req, res) => {
 // ROUTE - SEND MESSAGE (Z-API) - OTIMIZADO
 // ============================================
 
-app.post('/api/send-message', async (req, res) => {
-  try {
-    const { phone, message, image } = req.body;
-
-    if (!phone) {
-      return res.status(400).json({
-        success: false,
-        error: 'Phone é obrigatório'
-      });
-    }
-
-    if (!message && !image) {
-      return res.status(400).json({
-        success: false,
-        error: 'Message ou image são obrigatórios'
-      });
-    }
-
-    const activeAccount = await Account.findOne({
-      status: 'CONNECTED',
-      zApiUrl: { $exists: true, $ne: null }
-    });
-
-    if (!activeAccount || !activeAccount.zApiUrl) {
-      return res.status(400).json({
-        success: false,
-        error: 'Nenhuma conta Z-API conectada'
-      });
-    }
-
-    const cleanPhone = phone.replace(/\D/g, '');
-
-    // Limpar URL da Z-API
-    let baseUrl = activeAccount.zApiUrl;
-    if (baseUrl.includes('/token/')) {
-      baseUrl = baseUrl.substring(0, baseUrl.indexOf('/token/'));
-    }
-
-    if (baseUrl.endsWith('/')) {
-      baseUrl = baseUrl.slice(0, -1);
-    }
-
-    let endpoint = `${baseUrl}/send-text`;
-    const body = { phone: cleanPhone };
-
-    if (image) {
-      endpoint = `${baseUrl}/send-image`;
-
-      // ✅ GARANTIR que tem prefixo data:image
-      let imageToSend = image.trim();
-      if (!imageToSend.startsWith('data:image')) {
-        imageToSend = 'data:image/jpeg;base64,' + imageToSend;
-      }
-
-      body.image = imageToSend;
-
-      if (message) {
-        body.caption = message;
-      }
-
-      console.log('📷 Tamanho da imagem:', imageToSend.length, 'bytes');
-    } else {
-      body.message = message;
-    }
-
-    const headers = { 'Content-Type': 'application/json' };
-    if (activeAccount.zApiClientToken) {
-      headers['Client-Token'] = activeAccount.zApiClientToken;
-    }
-
-    console.log('📤 Enviando via Z-API:', {
-      endpoint,
-      phone: cleanPhone,
-      hasMessage: !!message,
-      hasImage: !!image
-    });
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    });
-
-    const resData = await response.json();
-
-    if (response.ok) {
-      const msgId = resData.messageId || resData.id || resData.zaapId;
-      console.log('✅ Mensagem enviada via Z-API:', msgId);
-      return res.json({
-        success: true,
-        messageId: msgId
-      });
-    }
-
-    console.error('❌ Erro Z-API:', resData);
-    return res.status(500).json({
-      success: false,
-      error: resData.message || resData.error || 'Erro ao enviar'
-    });
-
-  } catch (error) {
-    console.error('❌ Erro ao enviar mensagem:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 // ============================================
 // STATS
