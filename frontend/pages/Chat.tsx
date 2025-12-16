@@ -260,10 +260,10 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="h-screen flex bg-gray-800">
+    <div className="h-screen flex bg-gray-900 text-gray-200"> {/* Cor de fundo principal ajustada */}
       {/* Lista de Chats */}
-      <div className="w-80 bg-card border-r flex flex-col">
-        <div className="p-4 border-b">
+      <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col"> {/* Fundo da lista de chats ajustado */}
+        <div className="p-4 border-b border-gray-700">
           <h2 className="text-xl font-semibold text-white">Conversas</h2>
         </div>
 
@@ -278,8 +278,8 @@ export default function ChatPage() {
               <div
                 key={chat.phone}
                 onClick={() => setActivePhone(chat.phone)}
-                className={`p-4 border-b cursor-pointer hover:bg-gray-800 transition ${
-                  activePhone === chat.phone ? 'bg-green-50 border-l-4 border-l-green-500' : ''
+                className={`p-4 border-b border-gray-700 cursor-pointer hover:bg-gray-700 transition ${
+                  activePhone === chat.phone ? 'bg-gray-700 border-l-4 border-l-green-500' : ''
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -287,7 +287,7 @@ export default function ChatPage() {
                     <p className="font-medium text-white">
                       {chat.contactName || chat.phone}
                     </p>
-                    <p className="text-sm text-gray-500 truncate">{chat.lastMessage}</p>
+                    <p className="text-sm text-gray-400 truncate">{chat.lastMessage}</p> {/* Cor do texto ajustada */}
                   </div>
                   {chat.unreadCount > 0 && (
                     <span className="bg-green-500 text-white text-xs rounded-full px-2 py-1">
@@ -306,7 +306,7 @@ export default function ChatPage() {
         {activePhone ? (
           <>
             {/* Header com Botão de Excluir Conversa */}
-            <div className="bg-card border-b p-4 flex items-center justify-between">
+            <div className="bg-gray-800 border-b border-gray-700 p-4 flex items-center justify-between">
               <div>
                 <h3 className="font-semibold text-white">{activePhone}</h3>
               </div>
@@ -315,7 +315,7 @@ export default function ChatPage() {
               <button
                 onClick={handleDeleteChat}
                 disabled={loading}
-                className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+                className="flex items-center gap-2 px-3 py-2 text-red-400 hover:bg-gray-700 rounded-lg transition disabled:opacity-50"
                 title="Excluir conversa"
               >
                 <Trash2 size={18} />
@@ -324,7 +324,7 @@ export default function ChatPage() {
             </div>
 
             {/* Mensagens */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-800">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-900" style={{backgroundImage: 'url(https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png)', opacity: 0.9}}> 
               {messages.map((msg) => (
                 <div
                   key={msg._id}
@@ -355,7 +355,7 @@ export default function ChatPage() {
                       className={`max-w-md px-4 py-2 rounded-2xl ${
                         msg.fromMe
                           ? 'bg-green-500 text-white rounded-br-none'
-                          : 'bg-card text-white rounded-bl-none shadow'
+                          : 'bg-gray-800 text-white rounded-bl-none shadow' // Fundo da mensagem de usuário ajustado
                       }`}
                     >
                       <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
@@ -377,14 +377,14 @@ export default function ChatPage() {
             </div>
 
             {/* Input de Mensagem */}
-            <form onSubmit={handleSendMessage} className="bg-card border-t p-4">
+            <form onSubmit={handleSendMessage} className="bg-gray-800 border-t border-gray-700 p-4">
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
                   placeholder="Digite uma mensagem..."
-                  className="flex-1 px-4 py-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="flex-1 px-4 py-2 border border-gray-600 bg-gray-700 text-white rounded-full focus:outline-none focus:ring-2 focus:ring-green-500" // Input corrigido para fundo escuro e texto branco
                 />
                 <button
                   type="submit"
@@ -408,28 +408,28 @@ export default function ChatPage() {
 
       {/* ============================================ */}
       {/* MODAL DE ENCAMINHAR MENSAGEM */}
-      {/* ============================================ */}
+      {============================================*/}
       {showForwardModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-card rounded-lg shadow-xl max-w-md w-full max-h-[80vh] flex flex-col">
-            <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Encaminhar mensagem</h3>
+          <div className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[80vh] flex flex-col">
+            <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">Encaminhar mensagem</h3>
               <button
                 onClick={() => setShowForwardModal(false)}
-                className="text-gray-400 hover:text-gray-400"
+                className="text-gray-400 hover:text-white"
               >
                 <X size={20} />
               </button>
             </div>
 
-            <div className="p-4 bg-gray-800 border-b">
+            <div className="p-4 bg-gray-700 border-b border-gray-600">
               <p className="text-sm text-gray-400 mb-1">Mensagem:</p>
-              <p className="text-sm bg-card p-2 rounded border italic">
+              <p className="text-sm bg-gray-800 p-2 rounded border border-gray-600 italic text-white">
                 "{messageToForward?.text}"
               </p>
             </div>
 
-            <div className="p-4 border-b">
+            <div className="p-4 border-b border-gray-700">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                 <input
@@ -437,7 +437,7 @@ export default function ChatPage() {
                   value={forwardSearchTerm}
                   onChange={(e) => setForwardSearchTerm(e.target.value)}
                   placeholder="Buscar contato..."
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-600 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
             </div>
@@ -452,26 +452,26 @@ export default function ChatPage() {
                     onClick={() => toggleSelectContact(contact.phone)}
                     className={`p-3 rounded-lg cursor-pointer transition mb-1 flex items-center justify-between ${
                       selectedForwardContacts.includes(contact.phone)
-                        ? 'bg-green-100 border-2 border-green-500'
-                        : 'bg-gray-800 hover:bg-gray-800'
+                        ? 'bg-green-500/30 border-2 border-green-500'
+                        : 'bg-gray-800 hover:bg-gray-700' // Fundo do item de contato ajustado
                     }`}
                   >
                     <div>
                       <p className="font-medium text-white">{contact.name}</p>
-                      <p className="text-sm text-gray-500">{contact.phone}</p>
+                      <p className="text-sm text-gray-400">{contact.phone}</p>
                     </div>
                     {selectedForwardContacts.includes(contact.phone) && (
-                      <Check size={20} className="text-green-600" />
+                      <Check size={20} className="text-green-400" />
                     )}
                   </div>
                 ))
               )}
             </div>
 
-            <div className="p-4 border-t flex gap-2">
+            <div className="p-4 border-t border-gray-700 flex gap-2">
               <button
                 onClick={() => setShowForwardModal(false)}
-                className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-800 transition"
+                className="flex-1 px-4 py-2 border border-gray-600 rounded-lg hover:bg-gray-700 transition text-gray-200"
                 disabled={loading}
               >
                 Cancelar
