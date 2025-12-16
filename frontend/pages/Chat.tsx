@@ -324,7 +324,7 @@ export default function ChatPage() {
             </div>
 
             {/* Mensagens */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-800">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950">
               {messages.map((msg) => (
                 <div
                   key={msg._id}
