@@ -699,7 +699,6 @@ app.post('/api/send-message', async (req, res) => {
       baseUrl = baseUrl.slice(0, -1);
     }
 
-    // Definir endpoint e body
     let endpoint = `${baseUrl}/send-text`;
     const body = { phone: cleanPhone };
     const headers = { 'Content-Type': 'application/json' };
@@ -711,23 +710,19 @@ app.post('/api/send-message', async (req, res) => {
     if (image) {
       endpoint = `${baseUrl}/send-image`;
 
-      // Tratamento robusto para imagem (Base64 vs URL)
       let imageToSend = image.trim();
-      // Se não for link http/https e não tiver prefixo data:image, adiciona prefixo
       if (!imageToSend.startsWith('http') && !imageToSend.startsWith('data:image')) {
           imageToSend = 'data:image/jpeg;base64,' + imageToSend;
       }
 
       body.image = imageToSend;
 
-      // Se tem imagem, o texto vai no caption
       if (finalMessage) {
         body.caption = finalMessage;
       }
 
       console.log('📷 Enviando imagem. Tamanho aprox:', imageToSend.length, 'bytes');
     } else {
-      // Apenas texto
       body.message = finalMessage;
     }
 
@@ -747,13 +742,23 @@ app.post('/api/send-message', async (req, res) => {
 
     const resData = await response.json();
 
+    // 🔍 LOG COMPLETO DA RESPOSTA PARA DEBUG
+    console.log('📨 RESPOSTA COMPLETA DA Z-API:', JSON.stringify(resData, null, 2));
+
     if (response.ok) {
-      const msgId = resData.messageId || resData.id || resData.zaapId;
+      // Tentar extrair o messageId de TODOS os formatos possíveis
+      const msgId = resData.messageId 
+                 || resData.id 
+                 || resData.zaapId 
+                 || resData.key?.id 
+                 || resData.data?.messageId 
+                 || 'SENT_WITHOUT_ID';
+
       console.log('✅ Mensagem enviada via Z-API:', msgId);
 
       return res.json({ success: true, messageId: msgId });
     } else {
-      console.error('❌ Erro Z-API:', resData);
+      console.error('❌ Erro Z-API (Status não OK):', resData);
       return res.status(500).json({ 
         success: false, 
         error: resData.message || resData.error || 'Erro ao enviar' 
