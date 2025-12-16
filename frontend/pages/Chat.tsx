@@ -384,7 +384,7 @@ export default function ChatPage() {
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
                   placeholder="Digite uma mensagem..."
-                  className="flex-1 px-4 py-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="flex-1 px-4 py-2 border rounded-full focus:outline-none focus:ring-2 focus:bg-slate-800"
                 />
                 <button
                   type="submit"
