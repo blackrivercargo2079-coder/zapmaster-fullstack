@@ -14,10 +14,14 @@ const Dashboard: React.FC = () => {
     activeCampaigns: 0
   });
 
+  // ✅ CORRIGIDO: Estados para dados dos gráficos
+  const [weeklyData, setWeeklyData] = useState<any[]>([]);
+  const [trendData, setTrendData] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Dados vazios para os gráficos
+  // Dados vazios como fallback
   const emptyWeeklyData = [
     { name: 'Seg', envios: 0, recebidos: 0 },
     { name: 'Ter', envios: 0, recebidos: 0 },
@@ -52,9 +56,25 @@ const Dashboard: React.FC = () => {
       const data = await response.json();
       setStats(data);
 
+      // ✅ CORRIGIDO: Atualizar dados dos gráficos com dados reais
+      if (data.weeklyActivity && Array.isArray(data.weeklyActivity)) {
+        setWeeklyData(data.weeklyActivity);
+      } else {
+        setWeeklyData(emptyWeeklyData);
+      }
+
+      if (data.registrationTrend && Array.isArray(data.registrationTrend)) {
+        setTrendData(data.registrationTrend);
+      } else {
+        setTrendData(emptyTrendData);
+      }
+
     } catch (err: any) {
       console.error('Erro ao carregar dashboard:', err);
       setError(err.message);
+      // Manter dados vazios em caso de erro
+      setWeeklyData(emptyWeeklyData);
+      setTrendData(emptyTrendData);
     } finally {
       setLoading(false);
     }
@@ -86,6 +106,10 @@ const Dashboard: React.FC = () => {
       <p className="text-xs text-gray-500">{subtext}</p>
     </div>
   );
+
+  // ✅ Verificar se há dados reais nos gráficos
+  const hasWeeklyData = weeklyData.some(d => d.envios > 0 || d.recebidos > 0);
+  const hasTrendData = trendData.some(d => d.cadastros > 0);
 
   return (
     <div className="space-y-6">
@@ -150,6 +174,7 @@ const Dashboard: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* ✅ CORRIGIDO: Usar weeklyData em vez de emptyWeeklyData */}
         <div className="bg-card border border-gray-700 rounded-2xl p-6 flex flex-col hover:border-gray-600 transition-colors">
           <h3 className="text-lg font-semibold text-white mb-6">Atividade Semanal</h3>
           {loading ? (
@@ -158,7 +183,7 @@ const Dashboard: React.FC = () => {
             </div>
           ) : (
             <div className="flex-1 w-full min-h-[300px]">
-              {stats.totalMessages === 0 ? (
+              {!hasWeeklyData ? (
                 <div className="flex items-center justify-center h-full text-gray-500">
                   <div className="text-center">
                     <p className="mb-2">📊 Nenhuma mensagem registrada</p>
@@ -167,7 +192,7 @@ const Dashboard: React.FC = () => {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={emptyWeeklyData}>
+                  <BarChart data={weeklyData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
                     <XAxis dataKey="name" stroke="#9ca3af" />
                     <YAxis stroke="#9ca3af" />
@@ -184,6 +209,7 @@ const Dashboard: React.FC = () => {
           )}
         </div>
 
+        {/* ✅ CORRIGIDO: Usar trendData em vez de emptyTrendData */}
         <div className="bg-card border border-gray-700 rounded-2xl p-6 flex flex-col hover:border-gray-600 transition-colors">
           <h3 className="text-lg font-semibold text-white mb-6">Tendência de Cadastro</h3>
           {loading ? (
@@ -192,7 +218,7 @@ const Dashboard: React.FC = () => {
             </div>
           ) : (
             <div className="flex-1 w-full min-h-[300px]">
-              {stats.totalContacts === 0 ? (
+              {!hasTrendData ? (
                 <div className="flex items-center justify-center h-full text-gray-500">
                   <div className="text-center">
                     <p className="mb-2">📈 Nenhum contato cadastrado</p>
@@ -201,7 +227,7 @@ const Dashboard: React.FC = () => {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={emptyTrendData}>
+                  <LineChart data={trendData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
                     <XAxis dataKey="name" stroke="#9ca3af" />
                     <YAxis stroke="#9ca3af" />
