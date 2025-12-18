@@ -1069,6 +1069,155 @@ app.get('/', (req, res) => {
 });
 
 // ============================================
+// ============================================
+// EVOLUTION API - ADICIONAR NO server.js
+// ============================================
+// Adicione este código ANTES do "module.exports = app;" no final do arquivo
+
+// Configuração da Evolution API
+const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || '';
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
+
+// ✅ CREATE INSTANCE
+app.post('/instance/create', async (req, res) => {
+  try {
+    if (!EVOLUTION_API_URL) {
+      return res.json({ 
+        status: 'created',
+        message: 'Modo demo - Configure EVOLUTION_API_URL no .env' 
+      });
+    }
+
+    const { instanceName } = req.body;
+    console.log('🔄 Criando instância:', instanceName);
+
+    const response = await fetch(`${EVOLUTION_API_URL}/instance/create`, {
+      method: 'POST',
+      headers: {
+        'apikey': EVOLUTION_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        instanceName,
+        qrcode: true,
+        integration: 'WHATSAPP-BAILEYS'
+      })
+    });
+
+    const data = await response.json();
+    console.log('✅ Instância criada:', data);
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Erro ao criar instância:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ✅ CONNECT INSTANCE (GET QR CODE)
+app.get('/instance/connect/:instanceName', async (req, res) => {
+  try {
+    if (!EVOLUTION_API_URL) {
+      return res.json({ 
+        base64: "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=ZapMaster-Demo",
+        status: 'SCANNING'
+      });
+    }
+
+    const { instanceName } = req.params;
+    console.log('📱 Buscando QR Code para:', instanceName);
+
+    const response = await fetch(`${EVOLUTION_API_URL}/instance/connect/${instanceName}`, {
+      method: 'GET',
+      headers: {
+        'apikey': EVOLUTION_API_KEY
+      }
+    });
+
+    const data = await response.json();
+    console.log('✅ QR Code obtido');
+
+    res.json({
+      base64: data.base64 || data.qrcode || data.code,
+      status: data.instance?.state || data.state || 'open',
+      instance: data.instance
+    });
+  } catch (error) {
+    console.error('❌ Erro ao buscar QR Code:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ✅ CHECK CONNECTION STATUS
+app.get('/instance/connectionState/:instanceName', async (req, res) => {
+  try {
+    if (!EVOLUTION_API_URL) {
+      return res.json({ state: 'close' });
+    }
+
+    const { instanceName } = req.params;
+
+    const response = await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`, {
+      method: 'GET',
+      headers: {
+        'apikey': EVOLUTION_API_KEY
+      }
+    });
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Erro ao verificar status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ✅ LOGOUT/DISCONNECT INSTANCE
+app.delete('/instance/logout/:instanceName', async (req, res) => {
+  try {
+    if (!EVOLUTION_API_URL) {
+      return res.json({ success: true });
+    }
+
+    const { instanceName } = req.params;
+    console.log('🔌 Desconectando:', instanceName);
+
+    const response = await fetch(`${EVOLUTION_API_URL}/instance/logout/${instanceName}`, {
+      method: 'DELETE',
+      headers: {
+        'apikey': EVOLUTION_API_KEY
+      }
+    });
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Erro ao desconectar:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ✅ FETCH INSTANCES (para o teste de conexão)
+app.get('/instance/fetchInstances', async (req, res) => {
+  try {
+    if (!EVOLUTION_API_URL) {
+      return res.json([]);
+    }
+
+    const response = await fetch(`${EVOLUTION_API_URL}/instance/fetchInstances`, {
+      method: 'GET',
+      headers: {
+        'apikey': EVOLUTION_API_KEY
+      }
+    });
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Erro ao buscar instâncias:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // START SERVER
 // ============================================
 if (process.env.NODE_ENV !== 'production') {
